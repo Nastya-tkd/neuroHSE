@@ -24,25 +24,29 @@ def _normalize_patch_intensity(patches, brain_mean, brain_std):
     return (patches - brain_mean) / (brain_std + 1e-6)
 
 
-def build_patch_dataset(t1_volume, label_volume, brain_mask, patch_size, max_voxels=None, seed=0):
+def select_labeled_coords(label_volume, brain_mask, max_voxels=None, seed=0):
     """
-    Returns coords (N,3), patches (N,1,p,p,p) float32, labels (N,) float32 in {0,1}.
-    label_volume must already be the {-1,0,+1} concordance map (0 = excluded).
+    Coordinates + labels only, no patches (cheap - patch extraction is what
+    was blowing up memory when done for every one of a subject's ~150k+
+    labeled voxels instead of just the handful actually trained/tested on).
+    Returns coords (N,3) int array, labels (N,) float32 in {0,1}.
     """
     coords = labeled_voxel_coords(label_volume, brain_mask)
     if max_voxels is not None and len(coords) > max_voxels:
         rng = np.random.default_rng(seed)
         idx = rng.choice(len(coords), size=max_voxels, replace=False)
         coords = coords[idx]
-
     raw_labels = label_volume[coords[:, 0], coords[:, 1], coords[:, 2]]
     labels = (raw_labels > 0).astype(np.float32)  # 1=concordant, 0=discordant
+    return coords, labels
 
+
+def extract_and_normalize_patches(t1_volume, coords, patch_size, brain_mask):
+    """patches (N,1,p,p,p) float32, intensity-normalized by whole-brain stats."""
     patches = extract_patches(t1_volume, coords, patch_size)
     brain_vals = t1_volume[brain_mask.astype(bool)]
     patches = _normalize_patch_intensity(patches, brain_vals.mean(), brain_vals.std())
-    patches = patches[:, None, :, :, :].astype(np.float32)  # add channel dim
-    return coords, patches, labels
+    return patches[:, None, :, :, :].astype(np.float32)  # add channel dim
 
 
 def train_one_fold(train_patches, train_labels, test_patches, test_labels,
@@ -107,15 +111,10 @@ def run_hemisphere_experiment(
     if margin_vox is None:
         margin_vox = patch_size // 2
 
-    coords, patches, labels = build_patch_dataset(
-        t1_volume, label_volume, brain_mask, patch_size, max_voxels=None, seed=seed
-    )
+    # Coordinates + labels for every labeled voxel (cheap - no patches yet).
+    coords, labels = select_labeled_coords(label_volume, brain_mask, max_voxels=None, seed=seed)
     midpoint = hemisphere_midpoint(t1_volume.shape, axis_index)
     side_a, side_b = split_by_axis(coords, axis_index, midpoint, margin_vox)
-
-    viz.plot_patch_examples(
-        patches[:, 0], labels, os.path.join(out_dir, f"{subject_name}_patch_examples.png")
-    )
 
     mid_slice_idx = t1_volume.shape[2] // 2
     plane_mask = np.abs(coords[:, 2] - mid_slice_idx) <= 2
@@ -135,16 +134,27 @@ def run_hemisphere_experiment(
             idx = rng.choice(idx, size=max_voxels_per_side, replace=False)
         return idx
 
+    # Only from here on do we extract patches - and only for the ~2*max_voxels_per_side
+    # voxels actually used, not every labeled voxel in the brain.
     idx_a, idx_b = subsample(side_a), subsample(side_b)
+    used_idx = np.concatenate([idx_a, idx_b])
+    used_patches = extract_and_normalize_patches(t1_volume, coords[used_idx], patch_size, brain_mask)
+    used_labels = labels[used_idx]
+    pos_a = np.arange(len(idx_a))
+    pos_b = np.arange(len(idx_a), len(idx_a) + len(idx_b))
+
+    viz.plot_patch_examples(
+        used_patches[:8, 0], used_labels[:8], os.path.join(out_dir, f"{subject_name}_patch_examples.png")
+    )
 
     fold_results = {}
     for fold_name, (train_idx, test_idx) in {
-        "A_train_B_test": (idx_a, idx_b),
-        "B_train_A_test": (idx_b, idx_a),
+        "A_train_B_test": (pos_a, pos_b),
+        "B_train_A_test": (pos_b, pos_a),
     }.items():
         model, history, test_pred, test_probs = train_one_fold(
-            patches[train_idx], labels[train_idx],
-            patches[test_idx], labels[test_idx],
+            used_patches[train_idx], used_labels[train_idx],
+            used_patches[test_idx], used_labels[test_idx],
             epochs=epochs, device=device, seed=seed,
         )
         viz.plot_training_curves(
@@ -152,7 +162,7 @@ def run_hemisphere_experiment(
             os.path.join(out_dir, f"{subject_name}_{fold_name}_curves.png"),
         )
         viz.plot_confusion_and_roc(
-            labels[test_idx], test_pred, test_probs, f"{subject_name}: {fold_name}",
+            used_labels[test_idx], test_pred, test_probs, f"{subject_name}: {fold_name}",
             os.path.join(out_dir, f"{subject_name}_{fold_name}_eval.png"),
         )
         fold_results[fold_name] = history["val_acc"][-1]
