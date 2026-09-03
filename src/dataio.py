@@ -7,6 +7,36 @@ derivative file paths used by the two_modes_of_hemodynamics pipeline
 import os
 import numpy as np
 import nibabel as nib
+from scipy import ndimage
+
+
+def simple_brain_mask(t1_volume):
+    """
+    Approximate brain mask via Otsu thresholding + largest connected
+    component + hole filling. Used only for subjects where we have a raw
+    (not already skull-stripped) T1w and no FSL/nilearn BET available.
+    Good enough to restrict patch centers to brain tissue; not a substitute
+    for a real skull-stripping tool if precise face/skull removal matters.
+    """
+    nz = t1_volume[t1_volume > 0]
+    hist, bin_edges = np.histogram(nz, bins=256)
+    hist = hist.astype(np.float64)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+    weight1 = np.cumsum(hist)
+    weight2 = np.cumsum(hist[::-1])[::-1]
+    mean1 = np.cumsum(hist * bin_centers) / np.clip(weight1, 1e-12, None)
+    mean2 = (np.cumsum((hist * bin_centers)[::-1]) / np.clip(weight2[::-1], 1e-12, None))[::-1]
+    variance12 = weight1[:-1] * weight2[1:] * (mean1[:-1] - mean2[1:]) ** 2
+    threshold = bin_centers[np.argmax(variance12)]
+
+    mask = t1_volume > threshold
+    labeled, n = ndimage.label(mask)
+    if n > 0:
+        largest = 1 + np.argmax(ndimage.sum(mask, labeled, range(1, n + 1)))
+        mask = labeled == largest
+    mask = ndimage.binary_fill_holes(mask)
+    return mask.astype(np.uint8)
 
 
 def load_nifti(path):
