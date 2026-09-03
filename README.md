@@ -87,6 +87,41 @@ per subject/condition — `*_R2prime.nii`, `*_cbv.nii`, `*_oef.nii`,
 were saved) — matching the paths in `src/dataio.py:SubjectPaths`. Raw MEGRE
 echoes alone are not sufficient without running the MATLAB step first.
 
+### The MATLAB pipeline itself (`qBOLD_BIDS_Hct_April21.zip`, from
+https://gitlab.lrz.de/nmrm_lab/public_projects/mq-bold - blocked here, but
+the zip ships inside the already-cloned `two_modes_of_hemodynamics` repo)
+
+Four stages: `run1_process_anatomy.m` (SPM12 segmentation), `run2_dsc_cbv.m`
+(CBV from contrast-agent DSC perfusion, with a **manual** AIF-selection
+step), `run3_mqBOLD_rOEF.m` (T2/T2' -> OEF), `run4_pCASL_CBF.m` (CBF from
+arterial spin labeling). Needs SPM12 (large separate MATLAB toolbox, not
+included) and ships precompiled Linux x86_64 MEX binaries for one
+sub-step.
+
+**Ported and actually run the one piece we have complete real data for:**
+`src/qbold.py::fit_t2_map` reimplements `calc_T2_map.m`'s per-voxel T2 fit
+(mono-exponential `S(TE) = a * exp(-TE/T2)`) as a vectorized linearized
+least-squares fit (the MATLAB original uses a custom bisection search - not
+a byte-for-byte port, see the module docstring) and
+`scripts/compute_t2_maps.py` runs it on the real 8-echo MESE series (pulled
+from the same S3 bucket, `scripts/download_mese.py`) for all 5 subjects.
+Verified against synthetic known-T2 data first (`tests/test_qbold.py`), then
+run for real: median brain T2 came out 76-79 ms for all 5 subjects, in the
+physiologically expected range at 3T.
+
+**Deliberately stopped there.** Getting from T2 to a real CMRO₂ (and hence a
+real concordant/discordant label) additionally needs, per condition: a
+T2*/T2S map from a separate per-condition multi-echo gradient-echo
+acquisition ("MEGRE" - only a few scattered echoes/conditions have been
+shared, not a complete series for any one subject/condition), CBF from
+pCASL (no raw pCASL data provided at all), CBV from DSC perfusion with
+contrast agent (none provided, and involves a manual AIF-selection step),
+and each subject's Hct (no participant table provided). None of that is a
+code problem - rewriting the rest to Python doesn't manufacture data that
+was never shared. Fabricating stand-in values for CBF/CBV/Hct to produce a
+"CMRO2" map would be scientifically invalid, so this module stops
+explicitly at T2 rather than doing that.
+
 `scripts/smoke_test.py` runs the entire pipeline above end-to-end on the real
 `sub-p019` T1 using a **synthetic** placeholder label (thresholded T1
 intensity + noise — no biological meaning) purely to prove patch extraction,
