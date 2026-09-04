@@ -50,12 +50,27 @@ def extract_and_normalize_patches(t1_volume, coords, patch_size, brain_mask):
     return patches[:, None, :, :, :].astype(np.float32)  # add channel dim
 
 
+def augment_patch_batch(xb, rng_state=None):
+    """
+    Random flip along each spatial axis (dims 2,3,4 of (N,1,p,p,p)),
+    independently per axis, applied to the whole batch at once. Standard,
+    label-preserving augmentation for small-patch 3D CNNs: the model only
+    ever sees local patch content (never absolute position in the brain),
+    so mirroring the patch changes nothing about what the label means.
+    """
+    for dim in (2, 3, 4):
+        if torch.rand(1).item() < 0.5:
+            xb = torch.flip(xb, dims=[dim])
+    return xb
+
+
 def train_one_fold(train_patches, train_labels, test_patches, test_labels,
                     epochs=15, batch_size=32, lr=1e-3, device="cpu", seed=0,
-                    model_factory=SimplePatchCNN):
+                    model_factory=SimplePatchCNN, augment=False, lr_schedule=False):
     torch.manual_seed(seed)
     model = model_factory().to(device)
     opt = torch.optim.Adam(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs) if lr_schedule else None
     loss_fn = torch.nn.BCEWithLogitsLoss()
 
     train_ds = TensorDataset(torch.from_numpy(train_patches), torch.from_numpy(train_labels))
@@ -70,6 +85,8 @@ def train_one_fold(train_patches, train_labels, test_patches, test_labels,
         losses, correct, total = [], 0, 0
         for xb, yb in train_dl:
             xb, yb = xb.to(device), yb.to(device)
+            if augment:
+                xb = augment_patch_batch(xb)
             opt.zero_grad()
             logits = model(xb)
             loss = loss_fn(logits, yb)
@@ -78,6 +95,8 @@ def train_one_fold(train_patches, train_labels, test_patches, test_labels,
             losses.append(loss.item())
             correct += ((logits > 0).float() == yb).sum().item()
             total += len(yb)
+        if scheduler is not None:
+            scheduler.step()
 
         model.eval()
         with torch.no_grad():

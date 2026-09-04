@@ -7,6 +7,7 @@ net) if accuracy on the simple model stays near chance.
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class SimplePatchCNN(nn.Module):
@@ -130,6 +131,69 @@ class AttentionPatchCNN(nn.Module):
         tokens = self.transformer(tokens)
         pooled = tokens.mean(dim=1)                    # (N, token_dim)
         return self.classifier(pooled).squeeze(-1)
+
+
+class PatchUNet(nn.Module):
+    """
+    A real U-Net: convolutional encoder-decoder with skip connections,
+    trained to output a dense per-voxel map over the whole patch, not just
+    a single pooled vector like the other architectures here.
+
+    This is a genuine architectural difference from SimplePatchCNN/
+    DeeperPatchCNN/AttentionPatchCNN, all of which collapse the patch to a
+    feature vector before ever making a spatial prediction. A U-Net instead
+    predicts densely and lets the decoder's skip connections recombine
+    fine (early-layer) and coarse (bottleneck) spatial detail at every
+    output location - the thing U-Nets are for.
+
+    The task here is one label per patch (the label belongs to the voxel
+    at the patch's center), not a segmentation map, so there's no dense
+    ground truth to supervise most of the output with. Resolved by reading
+    off the decoder's prediction AT THE CENTER VOXEL as the classification
+    logit - training and evaluation only ever look at that one location,
+    so this is still a real classification model, just one that reaches
+    its answer through a dense, skip-connected reconstruction instead of
+    global pooling. Uses F.interpolate (not transposed-conv striding) for
+    upsampling so odd patch sizes (9, 15, ...) work without shape mismatches
+    against the encoder skip features.
+    """
+
+    def __init__(self, in_channels=1, base_channels=16):
+        super().__init__()
+        c = base_channels
+
+        def conv_block(cin, cout):
+            return nn.Sequential(
+                nn.Conv3d(cin, cout, kernel_size=3, padding=1), nn.BatchNorm3d(cout), nn.ReLU(inplace=True),
+                nn.Conv3d(cout, cout, kernel_size=3, padding=1), nn.BatchNorm3d(cout), nn.ReLU(inplace=True),
+            )
+
+        self.enc1 = conv_block(in_channels, c)
+        self.enc2 = conv_block(c, c * 2)
+        self.bottleneck = conv_block(c * 2, c * 4)
+
+        self.dec2 = conv_block(c * 4 + c * 2, c * 2)
+        self.dec1 = conv_block(c * 2 + c, c)
+
+        self.pool = nn.MaxPool3d(2, ceil_mode=True)
+        self.out_conv = nn.Conv3d(c, 1, kernel_size=1)
+
+    def forward(self, x):
+        """x: (N, 1, p, p, p) -> logits (N,), read from the output map's center voxel."""
+        e1 = self.enc1(x)                              # (N, c,   p,  p,  p)
+        e2 = self.enc2(self.pool(e1))                   # (N, 2c, p/2,p/2,p/2)
+        b = self.bottleneck(self.pool(e2))              # (N, 4c, p/4,p/4,p/4)
+
+        up2 = F.interpolate(b, size=e2.shape[2:], mode="trilinear", align_corners=False)
+        d2 = self.dec2(torch.cat([up2, e2], dim=1))     # (N, 2c, p/2,p/2,p/2)
+
+        up1 = F.interpolate(d2, size=e1.shape[2:], mode="trilinear", align_corners=False)
+        d1 = self.dec1(torch.cat([up1, e1], dim=1))     # (N, c, p, p, p)
+
+        out_map = self.out_conv(d1)                     # (N, 1, p, p, p)
+        p = out_map.shape[-1]
+        center = p // 2
+        return out_map[:, 0, center, center, center]    # (N,)
 
 
 class PatchBOLDNet(nn.Module):
