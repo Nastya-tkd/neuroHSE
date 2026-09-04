@@ -116,3 +116,20 @@ def plot_fold_accuracy_summary(fold_results, out_path):
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
+
+
+def plot_regression_scatter(y_true, y_pred, r2, title, out_path):
+    """Predicted vs true (standardized) CMRO2_percchange, one point per test voxel."""
+    fig, ax = plt.subplots(figsize=(4.5, 4.5))
+    ax.scatter(y_true, y_pred, s=3, alpha=0.15, color="#8e44ad")
+    lims = [min(y_true.min(), y_pred.min()), max(y_true.max(), y_pred.max())]
+    ax.plot(lims, lims, color="gray", linestyle=":", linewidth=1, label="perfect prediction")
+    ax.axhline(0, color="lightgray", linewidth=0.8)
+    ax.axvline(0, color="lightgray", linewidth=0.8)
+    ax.set_xlabel("true CMRO2 %change (standardized)")
+    ax.set_ylabel("predicted CMRO2 %change (standardized)")
+    ax.set_title(f"{title}\nR2 = {r2:.3f}", fontsize=10)
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
