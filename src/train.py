@@ -175,6 +175,68 @@ def run_hemisphere_experiment(
     return fold_results
 
 
+def train_one_fold_regression(train_patches, train_targets, test_patches, test_targets,
+                               epochs=15, batch_size=32, lr=1e-3, device="cpu", seed=0,
+                               model_factory=SimplePatchCNN):
+    """
+    Alternative framing to train_one_fold: regress the continuous
+    CMRO2_percchange value directly (SimplePatchCNN's raw scalar output,
+    no sigmoid) instead of classifying its sign combined with BOLD's sign.
+    Preserves magnitude information the binary concordant/discordant label
+    throws away.
+
+    Targets are standardized using TRAIN-set mean/std only (no test-set
+    statistics leak into training) before fitting; reported MSE/R2 are on
+    that standardized scale, comparable directly across folds/contrasts.
+    """
+    torch.manual_seed(seed)
+    model = model_factory().to(device)
+    opt = torch.optim.Adam(model.parameters(), lr=lr)
+    loss_fn = torch.nn.MSELoss()
+
+    train_mean = float(train_targets.mean())
+    train_std = float(train_targets.std()) + 1e-6
+    train_targets_norm = ((train_targets - train_mean) / train_std).astype(np.float32)
+    test_targets_norm = ((test_targets - train_mean) / train_std).astype(np.float32)
+
+    train_ds = TensorDataset(torch.from_numpy(train_patches), torch.from_numpy(train_targets_norm))
+    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+
+    x_test = torch.from_numpy(test_patches).to(device)
+    y_test = torch.from_numpy(test_targets_norm).to(device)
+
+    history = {"train_loss": [], "test_mse": [], "test_r2": []}
+    for epoch in range(epochs):
+        model.train()
+        losses = []
+        for xb, yb in train_dl:
+            xb, yb = xb.to(device), yb.to(device)
+            opt.zero_grad()
+            pred = model(xb)
+            loss = loss_fn(pred, yb)
+            loss.backward()
+            opt.step()
+            losses.append(loss.item())
+
+        model.eval()
+        with torch.no_grad():
+            test_pred = model(x_test)
+            mse = loss_fn(test_pred, y_test).item()
+            ss_res = ((y_test - test_pred) ** 2).sum().item()
+            ss_tot = ((y_test - y_test.mean()) ** 2).sum().item()
+            r2 = 1 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+
+        history["train_loss"].append(float(np.mean(losses)))
+        history["test_mse"].append(mse)
+        history["test_r2"].append(r2)
+
+    model.eval()
+    with torch.no_grad():
+        test_pred = model(x_test).cpu().numpy()
+
+    return model, history, test_pred, test_targets_norm
+
+
 def train_one_fold_multimodal(train_patches, train_bold, train_labels,
                                test_patches, test_bold, test_labels,
                                epochs=15, batch_size=32, lr=1e-3, device="cpu", seed=0,
