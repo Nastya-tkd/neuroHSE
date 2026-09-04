@@ -149,10 +149,34 @@ the same pipeline that gets 75-82% on the intensity-threshold sanity check
 (`results/smoke_test_all/`) gets chance accuracy here, so the model
 *can* learn when there is something learnable in a patch; it just isn't
 finding a concordant/discordant signal in raw T1 intensity alone with this
-architecture. Per the supervisor's contingency plan, next step is
-`DeeperPatchCNN` (`src/model.py`, residual blocks, already implemented) on
-the same real labels - swap `SimplePatchCNN` for `DeeperPatchCNN` in
-`src/train.py:train_one_fold` and rerun `scripts/run_real_experiment.py`.
+architecture.
+
+### Tried the supervisor's contingency (deeper / attention model) - same result
+
+`src/model.py` also has `DeeperPatchCNN` (residual blocks) and
+`AttentionPatchCNN` (conv encoder + transformer self-attention over the
+patch's spatial tokens - the per-patch-classification adaptation of a
+"U-Net with transformer" like MS-DSA-NET, minus the decoder half a
+segmentation network needs and a classifier doesn't). `src/train.py`'s
+`model_factory` argument makes the architecture pluggable.
+`scripts/run_real_experiment_v2.py` ran both on the same real labels: 5
+subjects x 2 contrasts x 2 architectures x 2 fold directions = 40 runs.
+Result: `DeeperPatchCNN` mean 0.513 (std 0.020), `AttentionPatchCNN` mean
+0.506 (std 0.013) - every single run in both architectures falls in
+0.47-0.55, i.e. chance, same as `SimplePatchCNN`.
+
+**Conclusion so far:** three architectures of increasing capacity
+(a 2-layer CNN, a residual CNN, a conv+transformer hybrid), tested on 5
+subjects and 2 independent task contrasts with a leakage-safe hemisphere
+split (60 total training runs), converge tightly on chance-level accuracy.
+That convergence across architectures is itself informative - it argues
+against "the model just isn't expressive enough yet" and toward "there is
+no signal in a raw T1 patch (9x9x9 voxels, ~1.8cm cube) alone that predicts
+this voxel's concordant/discordant status" for this task as currently
+posed. This does not rule out: a different patch size, additional
+structural contrasts (T2, the T2 map already computed in this repo, R2'),
+more training data (more subjects), or - per the supervisor's own
+Experiment 2 - adding the plain BOLD signal as an extra input.
 
 Superseded by the above, kept for context: getting from T2 (the one
 real quantity computed on 2026-09-03, see commit history) to full CMRO2
