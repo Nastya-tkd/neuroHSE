@@ -21,6 +21,7 @@ For each subject, downloads:
 import os
 import sys
 import json
+import time
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -42,12 +43,42 @@ NEEDED_SUFFIXES = [
 ]
 
 
-def download_versioned(key, version_id, out_path):
+def download_versioned(key, version_id, out_path, retries=4):
+    """Downloads to a .part temp file first, only renaming to out_path on a
+    complete, verified transfer - so a failed/interrupted attempt (large
+    filtered_func downloads occasionally drop mid-transfer) never leaves a
+    corrupt file sitting where the "already downloaded, skip" check above
+    would trust it next run. Retries with backoff on transient failures."""
     if os.path.exists(out_path):
         return out_path
     url = S3_BASE + key.replace(" ", "%20") + f"?versionId={version_id}"
-    urllib.request.urlretrieve(url, out_path)
-    return out_path
+    tmp_path = out_path + ".part"
+
+    last_err = None
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(url) as resp:
+                expected = resp.headers.get("Content-Length")
+                expected = int(expected) if expected else None
+                with open(tmp_path, "wb") as f:
+                    written = 0
+                    while True:
+                        chunk = resp.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        written += len(chunk)
+            if expected is not None and written != expected:
+                raise IOError(f"incomplete download: got {written} of {expected} bytes")
+            os.replace(tmp_path, out_path)
+            return out_path
+        except Exception as e:
+            last_err = e
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)
+    raise last_err
 
 
 def download_subject_labels(subject, versions_cache_dir=VERSIONS_CACHE_DIR, data_dir=DATA_DIR):
