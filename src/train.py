@@ -178,10 +178,15 @@ def run_hemisphere_experiment(
 def train_one_fold_multimodal(train_patches, train_bold, train_labels,
                                test_patches, test_bold, test_labels,
                                epochs=15, batch_size=32, lr=1e-3, device="cpu", seed=0,
-                               bold_len=None):
-    """Same training loop as train_one_fold, but for PatchBOLDNet's two inputs."""
+                               model_factory=None, bold_len=None):
+    """Same training loop as train_one_fold, but for a two-branch (patch,
+    feature-vector) model - PatchBOLDNet (raw time series) by default, or
+    e.g. PatchBOLDConditionNet (compact per-condition features) via
+    model_factory."""
     torch.manual_seed(seed)
-    model = PatchBOLDNet(bold_len=bold_len or train_bold.shape[1]).to(device)
+    if model_factory is None:
+        model_factory = lambda: PatchBOLDNet(bold_len=bold_len or train_bold.shape[1])
+    model = model_factory().to(device)
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     loss_fn = torch.nn.BCEWithLogitsLoss()
 

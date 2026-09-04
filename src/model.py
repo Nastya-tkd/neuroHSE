@@ -188,3 +188,52 @@ class PatchBOLDNet(nn.Module):
         bold_feat = self.bold_branch(bold_vec.unsqueeze(1))
         combined = torch.cat([patch_feat, bold_feat], dim=1)
         return self.classifier(combined).squeeze(-1)
+
+
+class PatchBOLDConditionNet(nn.Module):
+    """
+    Same idea as PatchBOLDNet, but for a compact per-condition BOLD feature
+    vector (src/bold_features.py:compute_condition_features - percent
+    signal change per task condition, a handful of numbers) instead of the
+    full raw time series. A small MLP is the appropriate match for a short,
+    already-summarized feature vector - a 1D conv (built for finding
+    patterns *along* a sequence) has nothing to do here.
+    """
+
+    def __init__(self, patch_channels=1, patch_base=8, n_bold_features=3, bold_hidden=16):
+        super().__init__()
+        c = patch_base
+        self.patch_branch = nn.Sequential(
+            nn.Conv3d(patch_channels, c, kernel_size=3, padding=1),
+            nn.BatchNorm3d(c),
+            nn.ReLU(inplace=True),
+            nn.MaxPool3d(2),
+            nn.Conv3d(c, c * 2, kernel_size=3, padding=1),
+            nn.BatchNorm3d(c * 2),
+            nn.ReLU(inplace=True),
+            nn.AdaptiveAvgPool3d(1),
+            nn.Flatten(),
+        )
+        patch_feat_dim = c * 2
+
+        self.bold_branch = nn.Sequential(
+            nn.Linear(n_bold_features, bold_hidden),
+            nn.ReLU(inplace=True),
+            nn.Linear(bold_hidden, bold_hidden),
+            nn.ReLU(inplace=True),
+        )
+
+        combined_dim = patch_feat_dim + bold_hidden
+        self.classifier = nn.Sequential(
+            nn.Linear(combined_dim, combined_dim),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(combined_dim, 1),
+        )
+
+    def forward(self, patch, bold_feat):
+        """patch: (N, 1, p, p, p). bold_feat: (N, n_bold_features). -> logits (N,)"""
+        patch_feat = self.patch_branch(patch)
+        bold_feat = self.bold_branch(bold_feat)
+        combined = torch.cat([patch_feat, bold_feat], dim=1)
+        return self.classifier(combined).squeeze(-1)
