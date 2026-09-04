@@ -275,6 +275,52 @@ negative R2 across every condition says the little bit the model does
 "learn" from the training hemisphere actively fails to generalize to the
 other hemisphere, in every configuration tried.
 
+## Follow-up: covariates, coarse regions, and a positive control
+
+Four more items requested; one attempted honestly and found blocked, one
+substituted for what was actually obtainable, two run as real experiments.
+All four reuse `PatchBOLDConditionNet` (structural patch + small feature
+vector) with a different feature source, on the same 25-subject pool
+(`scripts/run_extras.py`).
+
+**Pretrained 3D-MRI backbone, fine-tuned here - blocked, not attempted.**
+Cloned `Tencent/MedicalNet` to check directly: no `.pth`/`.pt` weights are
+committed to the repo, the README points to Google Drive / Baidu Pan, both
+blocked by this session's network policy (confirmed: OSF, NITRC,
+Hugging Face, Zenodo, Google Drive all return connection failures). Faking
+"pretrained" via a randomly-initialized network would misrepresent the
+result, so this item was not run.
+
+**Real anatomical parcellation (Glasser/HCP-MMP) - also blocked, substituted
+honestly.** The atlas itself isn't obtainable here either (same blocked
+hosts, no local FSL install, and this session's GitHub search tool is
+scoped to the one attached repository rather than all of GitHub, so no
+alternative atlas source could even be located). Ran a **coarse geometric
+grid** instead - T1 mean/std over big anterior-posterior x inferior-superior
+blocks, computed separately per hemisphere-split side so no block straddles
+train/test - more spatial context than a patch, but explicitly **not**
+anatomically informed, and reported as such rather than mislabeled as the
+requested atlas.
+
+**Covariates (age/Hct/sex from `participants.tsv`) - a real experiment.**
+0.480-0.531 across both contrasts and fold directions - chance, like
+everything else.
+
+**Oracle / positive control - not a scientific result.** Feeds the model
+the real `BOLD_percchange` and `CMRO2_percchange` values that *define* the
+label directly, so high accuracy is expected by construction; this is a
+pipeline sanity check, not a finding about structure. Verified first on one
+subject (0.956 accuracy) to confirm the concept works, then run pooled
+across all 25: **0.734-0.741** - clearly, unambiguously separated from
+every real experiment's 0.48-0.53, confirming the training pipeline is
+capable of detecting real signal when it's actually present in the input.
+(The drop from 0.956 on one subject to ~0.74 pooled across 25 is itself
+informative and worth a follow-up if it matters: likely the small
+`PatchBOLDConditionNet` MLP branch under-converges in 15 epochs on a much
+larger, more heterogeneous pooled set - not something that changes the
+conclusion, since the gap to the near-chance real results stays enormous
+either way.)
+
 ### Where this leaves the project
 
 Across 104 real training runs total (Experiments 1-2, the pooled cohort,
