@@ -353,28 +353,51 @@ either; four architecturally distinct models (2 pooling CNNs, a
 transformer hybrid, and now a dense skip-connected U-Net) all converge on
 the same number.
 
+## Data-driven parcellation (k-means, one step up from the fixed grid)
+
+`scripts/run_parcellation.py` clusters each subject's own brain voxels
+(k=20, per hemisphere-split side) on `(y, z, local T1 intensity)` instead
+of a fixed geometric grid - cluster boundaries follow that subject's
+actual tissue-intensity structure, the standard approach for a data-driven
+parcellation when no group-level atlas is available (still not a real
+anatomical atlas - no correspondence to named regions across subjects,
+reported as that, not oversold). Each voxel's cluster gives a 3-feature
+descriptor (mean T1, T1 std, log-size) fed through `PatchBOLDConditionNet`.
+
+Run on the full 25-subject pool, 13,000 voxels/side/contrast: **0.502-0.523**
+- chance again, matching the fixed-grid version almost exactly.
+
 ### Where this leaves the project
 
-Across 104 real training runs total (Experiments 1-2, the pooled cohort,
-and this extended run), spanning 3 architectures, both raw and
-condition-averaged BOLD features, 2 patch sizes, both classification and
-regression framings, 5-to-25 real subjects, 2 independent task contrasts,
-and a leakage-safe split every time, nothing has beaten chance by a
-meaningful margin - and the regression framing did *worse* than chance
-(negative R2), the most unambiguous null of everything tried. Neither more
-data, a richer BOLD feature, more spatial context, nor a magnitude-
-preserving target moved the needle. That is a real, thoroughly-tested
-negative result for "a voxel's local structural (+ task-BOLD) neighborhood
-predicts its CMRO2 response" as currently posed, at the scales tried (up to
-~30x30x50mm patches). It does not mean the broader hypothesis (structure
-relates to hemodynamic coupling mode at all) is false - what's left
-genuinely untried: features at a full anatomical-parcel scale using a real
-brain atlas (bigger than the 15-voxel patch tested here, and anatomically
-meaningful rather than just a bigger cube), the remaining 15 subjects once
-their derivatives layout is handled (11 with a different naming scheme, 5
-with one specific missing file each), or looking beyond structure/BOLD
-entirely at variables this project hasn't touched (e.g. age, sex, Hct -
-already in `participants.tsv`).
+**136 real training runs**, all on genuine CMRO2/BOLD_percchange-derived
+labels, span: 4 architectures (a plain CNN, a residual CNN, a conv+
+transformer hybrid, and a real encoder-decoder U-Net), 3 BOLD
+representations (raw time series, per-condition percent change, none),
+3 non-structural feature sets (covariates, a fixed geometric grid, a
+data-driven k-means parcellation), 2 patch sizes, both classification and
+regression framings, augmented vs. unaugmented / short vs. longer
+training, 5-to-25 real subjects, 2 independent task contrasts, and a
+leakage-safe split every time. Every configuration lands at 0.48-0.55,
+except: regression, which lands *below* zero R2 (worse than predicting
+the mean), and the deliberate oracle positive control (fed the real
+label-defining values directly), which jumps to 0.73-0.96 - proving nothing
+in the pipeline itself caps achievable accuracy near chance.
+
+That combination - a hard ceiling that many different real features and
+architectures all hit, paired with a positive control that clears it
+easily when given the answer - is about as thorough a null result as this
+kind of study can produce without new data. It does not mean the broader
+hypothesis (structure relates to hemodynamic coupling mode at all) is
+false, but everything cheap to try from here without new data has been
+tried. What's left needs either: the remaining 15 subjects (11 with a
+different derivatives naming scheme, 5 missing one file each - real data,
+not a new idea, see the coverage table above), a real anatomical atlas
+if one becomes reachable (the k-means parcellation here is a genuine
+data-driven substitute, not the genuine article), or a different outcome
+variable/scale of analysis entirely (group-level statistics across
+subjects rather than per-voxel prediction within one, for instance) -
+not another architecture or another round of hyperparameter tuning on the
+same input.
 
 Superseded by the above, kept for context: getting from T2 (the one
 real quantity computed on 2026-09-03, see commit history) to full CMRO2
