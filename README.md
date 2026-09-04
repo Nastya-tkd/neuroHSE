@@ -178,6 +178,44 @@ structural contrasts (T2, the T2 map already computed in this repo, R2'),
 more training data (more subjects), or - per the supervisor's own
 Experiment 2 - adding the plain BOLD signal as an extra input.
 
+## Experiment 2: structural patch + plain BOLD signal
+
+Added `<sub>_task-all_space-T2_filtered_func.nii.gz` (FSL FEAT's fully
+preprocessed BOLD - motion correction, spatial smoothing, temporal
+high-pass filtering already applied, recovered the same way as the CMRO2/
+BOLD_percchange labels) as a second per-voxel input: each voxel's own
+400-timepoint series, linearly detrended and z-scored
+(`src/bold_features.py`). `PatchBOLDNet` (`src/model.py`) is a two-branch
+net - the same 3D conv trunk as `SimplePatchCNN` for the structural patch,
+plus a 1D conv trunk over the time axis for the BOLD vector - concatenated
+before the classifier head. Explicitly did NOT attempt field-inhomogeneity/
+dropout-artifact correction (signal loss near air-tissue boundaries); that
+needs subject-specific field maps and is flagged as an open gap, not
+silently skipped.
+
+`scripts/run_experiment2.py` ran this on the same real labels, same 5
+subjects x 2 contrasts x 2 fold directions (20 runs): **mean accuracy 0.516
+(std 0.017), every run in 0.48-0.57 - still chance level.** Adding the plain
+BOLD signal did not recover a signal that three structural-only
+architectures (Simple/Deeper/Attention, Experiment 1) also failed to find.
+
+### Where this leaves the project
+
+Across 80 real training runs (Experiment 1's 3 architectures + Experiment 2),
+on real CMRO2 + BOLD_percchange labels, 5 subjects, 2 independent task
+contrasts, and a leakage-safe hemisphere split every time, nothing has beaten
+chance. That is a real, reasonably well-powered negative result for
+"per-voxel concordant/discordant status is predictable from a small local
+patch of structural T1 (+ that voxel's own BOLD time series)" as currently
+posed. It does not mean the broader hypothesis (structure relates to
+hemodynamic coupling mode at all) is false - concrete things not yet tried:
+larger spatial context (bigger patches, or whole-ROI/parcel-level features
+instead of a small local cube), more subjects (5 is a small N for training
+a CNN from scratch per subject), or features derived from BOLD (e.g.
+per-condition percent-signal-change, which needs task timing/events.tsv -
+also recoverable via the same S3 version-history approach if useful) rather
+than the raw time series.
+
 Superseded by the above, kept for context: getting from T2 (the one
 real quantity computed on 2026-09-03, see commit history) to full CMRO2
 was originally thought to need re-deriving CBF/CBV/Hct from raw
