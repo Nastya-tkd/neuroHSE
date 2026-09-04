@@ -236,7 +236,9 @@ subjects) use a visibly different derivatives layout from the rest of the
 cohort (whole-head `_space-T2_T1w.nii` instead of a pre-skull-stripped
 `_space-T2_desc-brain_T1w.nii.gz`, and CBV-corrected CMRO2 naming instead
 of `desc-orig`) - real further work to support, not attempted here rather
-than rushed.
+than rushed. (Superseded below: those 11 subjects were later added via
+`src/subject_loader.py`, see "Cohort completion: 39/40 subjects" - 9 of
+the 11 turned out usable for the `calc` contrast.)
 
 **Result: still chance.** 25 subjects, ~12,500 pooled voxels per hemisphere
 per contrast, calc and mem contrasts, both fold directions, structural-only
@@ -367,37 +369,70 @@ descriptor (mean T1, T1 std, log-size) fed through `PatchBOLDConditionNet`.
 Run on the full 25-subject pool, 13,000 voxels/side/contrast: **0.502-0.523**
 - chance again, matching the fixed-grid version almost exactly.
 
+## Cohort completion: 39/40 subjects
+
+Every experiment above used the 25-subject subcohort because
+`load_subject_core()` in each script only knew one derivatives naming
+scheme - the 11 subjects sub-p058...sub-p068 use a different one (whole-head
+T1w instead of pre-skull-stripped, `BrMsk_CSF.nii` instead of the
+`_30slices` variant, `desc-CBV_cmro2` instead of `desc-orig_cmro2` for the
+task condition - this exact orig/CBV split matches the source repo's own
+`combined_pipeline.py` convention, not an improvisation) and were silently
+skipped every time, not because they're unusable.
+
+`src/subject_loader.py` tries both naming schemes per file (T1w, mask,
+control/task CMRO2, BOLD_percchange) and records which fallback, if any,
+was used - `scripts/run_full_cohort.py` reruns the structural-only baseline
+(`SimplePatchCNN`, patch=9) across the whole cohort with it. Verified by
+hand against sub-p058/059/060/061/063-068 (checking the S3 version listing
+directly) before trusting it on all 40.
+
+**Result: 39/40 subjects usable** (only sub-p058 is genuinely unrecoverable
+- confirmed directly that it has no control-condition CMRO2 in T2 space
+anywhere in its S3 version history, not a loader gap). None of the 9 new
+subjects have `mem`-contrast derivatives in any version of the dataset, so
+`calc` grows to 37 subjects (18,500 pooled voxels/side, up from 25 subjects
+/ 12,500 voxels/side) while `mem` stays at 30. Accuracy: **calc 0.499-0.513,
+mem 0.515-0.526** - indistinguishable from the 25-subject result despite
++48% more subjects and voxels for `calc`. This closes the last "cheap"
+open question about cohort size: growing the real, available cohort as far
+as this dataset allows (5 -> 25 -> 37 subjects) does not recover a signal at
+any scale tested.
+
 ### Where this leaves the project
 
-**136 real training runs**, all on genuine CMRO2/BOLD_percchange-derived
+**140 real training runs**, all on genuine CMRO2/BOLD_percchange-derived
 labels, span: 4 architectures (a plain CNN, a residual CNN, a conv+
 transformer hybrid, and a real encoder-decoder U-Net), 3 BOLD
 representations (raw time series, per-condition percent change, none),
 3 non-structural feature sets (covariates, a fixed geometric grid, a
 data-driven k-means parcellation), 2 patch sizes, both classification and
 regression framings, augmented vs. unaugmented / short vs. longer
-training, 5-to-25 real subjects, 2 independent task contrasts, and a
-leakage-safe split every time. Every configuration lands at 0.48-0.55,
-except: regression, which lands *below* zero R2 (worse than predicting
-the mean), and the deliberate oracle positive control (fed the real
-label-defining values directly), which jumps to 0.73-0.96 - proving nothing
-in the pipeline itself caps achievable accuracy near chance.
+training, 5-to-37 real subjects (39/40 of the dataset's usable cohort),
+2 independent task contrasts, and a leakage-safe split every time. Every
+configuration lands at 0.48-0.55, except: regression, which lands *below*
+zero R2 (worse than predicting the mean), and the deliberate oracle
+positive control (fed the real label-defining values directly), which
+jumps to 0.73-0.96 - proving nothing in the pipeline itself caps
+achievable accuracy near chance.
 
-That combination - a hard ceiling that many different real features and
-architectures all hit, paired with a positive control that clears it
-easily when given the answer - is about as thorough a null result as this
-kind of study can produce without new data. It does not mean the broader
-hypothesis (structure relates to hemodynamic coupling mode at all) is
-false, but everything cheap to try from here without new data has been
-tried. What's left needs either: the remaining 15 subjects (11 with a
-different derivatives naming scheme, 5 missing one file each - real data,
-not a new idea, see the coverage table above), a real anatomical atlas
-if one becomes reachable (the k-means parcellation here is a genuine
-data-driven substitute, not the genuine article), or a different outcome
+That combination - a hard ceiling that many different real features,
+architectures, and cohort sizes all hit, paired with a positive control
+that clears it easily when given the answer - is about as thorough a null
+result as this kind of study can produce without new data. It does not
+mean the broader hypothesis (structure relates to hemodynamic coupling
+mode at all) is false, but everything cheap to try from here without new
+data has been tried, including scaling the cohort as far as this dataset
+allows. What's left needs either: a real anatomical atlas if one becomes
+reachable (the k-means parcellation here is a genuine data-driven
+substitute, not the genuine article - Glasser/HCP-MMP and registration
+tooling remain blocked in this session), a pretrained 3D-MRI backbone
+fine-tuned here (also blocked - confirmed `Tencent/MedicalNet` ships no
+weights in-repo, only Google Drive/Baidu Pan links), or a different outcome
 variable/scale of analysis entirely (group-level statistics across
 subjects rather than per-voxel prediction within one, for instance) -
-not another architecture or another round of hyperparameter tuning on the
-same input.
+not another architecture, more data, or another round of hyperparameter
+tuning on the same input.
 
 Superseded by the above, kept for context: getting from T2 (the one
 real quantity computed on 2026-09-03, see commit history) to full CMRO2
