@@ -321,6 +321,38 @@ larger, more heterogeneous pooled set - not something that changes the
 conclusion, since the gap to the near-chance real results stays enormous
 either way.)
 
+## Fourth architecture (real U-Net) + longer, augmented training
+
+Two more requests: retrain under better conditions (not just 15 epochs,
+fixed LR, no augmentation), and try a genuine U-Net, not just another
+pooling classifier.
+
+**`PatchUNet`** (`src/model.py`): a real encoder-decoder with skip
+connections, upsampled via `F.interpolate` (robust to odd patch sizes like
+15, unlike transposed-conv striding). Unlike every other architecture here
+- which all collapse the patch to a feature vector before predicting
+anything - it predicts a dense map over the whole patch and reads the
+classification logit from the decoder output's center voxel, the actual
+location the label belongs to. Genuinely different inductive bias (dense,
+skip-connected reconstruction vs. global pooling), ~354K parameters.
+
+**Training-side improvements** (`src/train.py`): random-flip augmentation
+(safe here since the model never sees absolute position, only local patch
+content) and cosine LR annealing, both now optional flags on the existing
+training loop. `scripts/run_finetune.py` reran all 4 architectures -
+Simple/Deeper/Attention plus the new U-Net - with augmentation, the LR
+schedule, and 25 epochs (up from 15), on pooled real data (patch=15,
+capped at 3,000 voxels/side for compute - PatchUNet costs ~12x a plain CNN
+per step).
+
+**Result: 0.499-0.548 across all 4 architectures**, both contrasts, both
+fold directions - PatchUNet included, no better than the other three, and
+"best epoch across the whole run" tops out at 0.548, still far under the
+target range. Longer training with augmentation didn't recover anything
+either; four architecturally distinct models (2 pooling CNNs, a
+transformer hybrid, and now a dense skip-connected U-Net) all converge on
+the same number.
+
 ### Where this leaves the project
 
 Across 104 real training runs total (Experiments 1-2, the pooled cohort,
