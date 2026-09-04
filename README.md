@@ -173,10 +173,7 @@ That convergence across architectures is itself informative - it argues
 against "the model just isn't expressive enough yet" and toward "there is
 no signal in a raw T1 patch (9x9x9 voxels, ~1.8cm cube) alone that predicts
 this voxel's concordant/discordant status" for this task as currently
-posed. This does not rule out: a different patch size, additional
-structural contrasts (T2, the T2 map already computed in this repo, R2'),
-more training data (more subjects), or - per the supervisor's own
-Experiment 2 - adding the plain BOLD signal as an extra input.
+posed.
 
 ## Experiment 2: structural patch + plain BOLD signal
 
@@ -199,22 +196,73 @@ subjects x 2 contrasts x 2 fold directions (20 runs): **mean accuracy 0.516
 BOLD signal did not recover a signal that three structural-only
 architectures (Simple/Deeper/Attention, Experiment 1) also failed to find.
 
+## Scaled up: full cohort (25/40 subjects) + condition-averaged BOLD features
+
+Two follow-ups, both per direct user request: (1) use the full valid cohort
+instead of 5 subjects, (2) replace Experiment 2's raw BOLD time series with
+condition-averaged BOLD features.
+
+**Cohort scale-up, and a real design change.** `src/cohort.py` lists the 40
+valid `sub-pXXX` subjects (from `participants.tsv`, excluding 7 flagged
+`EXCLUDED` there). Fitting 40 more independent single-subject CNNs
+(each on ~1500 voxels/side) wouldn't actually use "more data" in any
+meaningful way for a data-hungry model - so `scripts/run_pooled_cohort.py`
+instead **pools voxels across all subjects**: one model trained on
+"hemisphere A across every subject" and tested on "hemisphere B across
+every subject" (and reversed). Still leakage-safe (no voxel's neighborhood
+crosses train/test, and now subjects don't either).
+
+**Condition-averaged BOLD features.** `src/bold_features.py:
+compute_condition_features` replaces Experiment 2's raw 400-timepoint
+vector with 3 numbers per voxel: percent signal change during calc, mem,
+and rest blocks (lag-adjusted, skipping the first ~4s of each block for
+hemodynamic delay), parsed from `events.tsv` (also recovered via S3
+version history - the block design has no separate "control" trial type,
+so "rest" is used as that baseline, an inferred mapping, documented as
+such). `PatchBOLDConditionNet` swaps Experiment 2's 1D-conv-over-time
+branch for a small MLP, the right tool for a short pre-summarized vector.
+
+**Data coverage: 25 of 40 subjects usable, and why the other 15 aren't.**
+Found and fixed a real bug along the way: 9 subjects' ~450-500MB
+`filtered_func` downloads failed mid-transfer, and the download helper
+was treating the resulting partial file as "already downloaded" on any
+retry - silently corrupting the input. Fixed with atomic writes (temp file
++ verified byte count + rename) and retry-with-backoff
+(`scripts/download_real_labels.py`); this recovered those 9 subjects
+(16 -> 25). The remaining 15: `sub-p028/p029/p048/p052/p055` are each
+missing one specific required file in the version history (not a network
+issue - the file just isn't there); `sub-p058` through `sub-p068` (11
+subjects) use a visibly different derivatives layout from the rest of the
+cohort (whole-head `_space-T2_T1w.nii` instead of a pre-skull-stripped
+`_space-T2_desc-brain_T1w.nii.gz`, and CBV-corrected CMRO2 naming instead
+of `desc-orig`) - real further work to support, not attempted here rather
+than rushed.
+
+**Result: still chance.** 25 subjects, ~12,500 pooled voxels per hemisphere
+per contrast, calc and mem contrasts, both fold directions, structural-only
+and structural+condition-BOLD models (8 results total): accuracy 0.494-0.532
+throughout - no meaningful movement from the 5-subject result, and nowhere
+near the supervisor's 0.65-0.70 target range.
+
 ### Where this leaves the project
 
-Across 80 real training runs (Experiment 1's 3 architectures + Experiment 2),
-on real CMRO2 + BOLD_percchange labels, 5 subjects, 2 independent task
-contrasts, and a leakage-safe hemisphere split every time, nothing has beaten
-chance. That is a real, reasonably well-powered negative result for
+Across 88 real training runs total (Experiments 1-2 plus the pooled cohort),
+spanning 3 architectures, both raw and condition-averaged BOLD features,
+5-to-25 real subjects, 2 independent task contrasts, and a leakage-safe
+split every time, nothing has beaten chance by a meaningful margin. Neither
+more data nor a richer BOLD feature moved the needle - which argues more
+strongly than the 5-subject result alone that the ceiling isn't sample size
+or feature engineering. That is a real, well-powered negative result for
 "per-voxel concordant/discordant status is predictable from a small local
-patch of structural T1 (+ that voxel's own BOLD time series)" as currently
-posed. It does not mean the broader hypothesis (structure relates to
-hemodynamic coupling mode at all) is false - concrete things not yet tried:
-larger spatial context (bigger patches, or whole-ROI/parcel-level features
-instead of a small local cube), more subjects (5 is a small N for training
-a CNN from scratch per subject), or features derived from BOLD (e.g.
-per-condition percent-signal-change, which needs task timing/events.tsv -
-also recoverable via the same S3 version-history approach if useful) rather
-than the raw time series.
+patch of structural T1 (+ that voxel's own task BOLD response)" as
+currently posed. It does not mean the broader hypothesis (structure relates
+to hemodynamic coupling mode at all) is false - concrete things not yet
+tried: larger spatial context (whole-ROI/parcel-level features instead of a
+small local cube - the supervisor's own plan mentions this as the fallback
+after "just add more data" isn't the answer), the remaining 11+5 subjects
+once their derivatives layout is handled, or a fundamentally different
+target (e.g. predicting the continuous CMRO2_percchange value via
+regression instead of thresholding it to a sign).
 
 Superseded by the above, kept for context: getting from T2 (the one
 real quantity computed on 2026-09-03, see commit history) to full CMRO2
