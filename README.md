@@ -109,18 +109,57 @@ Verified against synthetic known-T2 data first (`tests/test_qbold.py`), then
 run for real: median brain T2 came out 76-79 ms for all 5 subjects, in the
 physiologically expected range at 3T.
 
-**Deliberately stopped there.** Getting from T2 to a real CMRO₂ (and hence a
-real concordant/discordant label) additionally needs, per condition: a
-T2*/T2S map from a separate per-condition multi-echo gradient-echo
-acquisition ("MEGRE" - only a few scattered echoes/conditions have been
-shared, not a complete series for any one subject/condition), CBF from
-pCASL (no raw pCASL data provided at all), CBV from DSC perfusion with
-contrast agent (none provided, and involves a manual AIF-selection step),
-and each subject's Hct (no participant table provided). None of that is a
-code problem - rewriting the rest to Python doesn't manufacture data that
-was never shared. Fabricating stand-in values for CBF/CBV/Hct to produce a
-"CMRO2" map would be scientifically invalid, so this module stops
-explicitly at T2 rather than doing that.
+**Update - real labels recovered, no longer blocked.** OpenNeuro's S3 bucket
+has object versioning enabled, and ds004873's public listing (raw-only,
+`"DatasetType": "raw"`) turned out to be a later re-scoping: earlier
+snapshots of the same CC0-licensed dataset had a full `derivatives/` tree
+(~970 files/subject) with exactly the qmri/func outputs the source pipeline
+expects, plus `participants.tsv` (Hct/O2sat). S3 keeps old object content
+under a delete marker rather than erasing it, so `scripts/list_versions.py`
+(walks `?versions&prefix=...`, paginated) finds the last real version of
+each key and `scripts/download_real_labels.py` fetches it via
+`?versionId=...`. Recovered per subject: `*_space-T2_desc-brain_T1w.nii.gz`
+(structural, same space as the labels), `*_task-{calc,mem}control_space-T2_
+BOLD_percchange.nii.gz` (signed), and `*_task-{calc,control,mem}_space-T2_
+desc-orig_cmro2.nii` (Fick's-principle CMRO2, task and baseline).
+
+`scripts/run_real_experiment.py` computes the real label exactly as in
+`combined_pipeline.py` (`CMRO2_percchange = (CMRO2_task - CMRO2_control) /
+CMRO2_control * 100`, then `sign(CMRO2_percchange) * sign(BOLD_percchange)`)
+for both calc-vs-control and mem-vs-control per subject (a built-in
+replication check), and runs the same tested hemisphere-split classifier
+on it. Class balance came out ~45-55% concordant/discordant for every
+subject/contrast - no degenerate label.
+
+### Real result
+
+`results/real_experiment/real_experiment_summary.png` (not committed - real
+patient-derived data, see .gitignore): test accuracy is at chance (0.46-0.53)
+for all 5 subjects, both task contrasts (calc and mem), and both
+hemisphere-split directions - 20/20 runs. No subject or contrast stands out.
+This is exactly the outcome the supervisor's plan named as a real,
+actionable result ("если точность низкая... нужно усложнить архитектуру"):
+`SimplePatchCNN` (2 conv blocks) finds no signal in raw T1 patches alone
+predicting concordant/discordant status. Confusion matrices show a mild bias
+toward predicting the majority class rather than any real discrimination
+(e.g. sub-p019 calc: AUC 0.55).
+
+This is a real negative result for the simple model, not a code problem -
+the same pipeline that gets 75-82% on the intensity-threshold sanity check
+(`results/smoke_test_all/`) gets chance accuracy here, so the model
+*can* learn when there is something learnable in a patch; it just isn't
+finding a concordant/discordant signal in raw T1 intensity alone with this
+architecture. Per the supervisor's contingency plan, next step is
+`DeeperPatchCNN` (`src/model.py`, residual blocks, already implemented) on
+the same real labels - swap `SimplePatchCNN` for `DeeperPatchCNN` in
+`src/train.py:train_one_fold` and rerun `scripts/run_real_experiment.py`.
+
+Superseded by the above, kept for context: getting from T2 (the one
+real quantity computed on 2026-09-03, see commit history) to full CMRO2
+was originally thought to need re-deriving CBF/CBV/Hct from raw
+pCASL/DSC/MEGRE - which is true in general, but turned out to be
+unnecessary here since the already-computed CMRO2 itself was recoverable
+from version history rather than needing to be rebuilt from raw inputs.
 
 `scripts/smoke_test.py` runs the entire pipeline above end-to-end on the real
 `sub-p019` T1 using a **synthetic** placeholder label (thresholded T1
