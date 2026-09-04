@@ -130,3 +130,61 @@ class AttentionPatchCNN(nn.Module):
         tokens = self.transformer(tokens)
         pooled = tokens.mean(dim=1)                    # (N, token_dim)
         return self.classifier(pooled).squeeze(-1)
+
+
+class PatchBOLDNet(nn.Module):
+    """
+    Experiment 2: structural patch + per-voxel BOLD time series, two
+    branches concatenated before the classifier head.
+
+    Structural branch: same small conv trunk as SimplePatchCNN.
+    BOLD branch: 1D conv stack over the time axis (a time series is a
+    different kind of signal than a 3D patch - local temporal patterns,
+    not spatial neighborhoods - so a 1D conv over time, not another 3D
+    conv, is the appropriate match), then global average pooled.
+    """
+
+    def __init__(self, patch_channels=1, patch_base=8, bold_base=16, bold_len=400):
+        super().__init__()
+        c = patch_base
+        self.patch_branch = nn.Sequential(
+            nn.Conv3d(patch_channels, c, kernel_size=3, padding=1),
+            nn.BatchNorm3d(c),
+            nn.ReLU(inplace=True),
+            nn.MaxPool3d(2),
+            nn.Conv3d(c, c * 2, kernel_size=3, padding=1),
+            nn.BatchNorm3d(c * 2),
+            nn.ReLU(inplace=True),
+            nn.AdaptiveAvgPool3d(1),
+            nn.Flatten(),
+        )
+        patch_feat_dim = c * 2
+
+        bc = bold_base
+        self.bold_branch = nn.Sequential(
+            nn.Conv1d(1, bc, kernel_size=7, padding=3),
+            nn.BatchNorm1d(bc),
+            nn.ReLU(inplace=True),
+            nn.MaxPool1d(4),
+            nn.Conv1d(bc, bc * 2, kernel_size=7, padding=3),
+            nn.BatchNorm1d(bc * 2),
+            nn.ReLU(inplace=True),
+            nn.AdaptiveAvgPool1d(1),
+            nn.Flatten(),
+        )
+        bold_feat_dim = bc * 2
+
+        combined_dim = patch_feat_dim + bold_feat_dim
+        self.classifier = nn.Sequential(
+            nn.Linear(combined_dim, combined_dim),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(combined_dim, 1),
+        )
+
+    def forward(self, patch, bold_vec):
+        """patch: (N, 1, p, p, p). bold_vec: (N, T). -> logits (N,)"""
+        patch_feat = self.patch_branch(patch)
+        bold_feat = self.bold_branch(bold_vec.unsqueeze(1))
+        combined = torch.cat([patch_feat, bold_feat], dim=1)
+        return self.classifier(combined).squeeze(-1)
