@@ -50,9 +50,10 @@ def extract_and_normalize_patches(t1_volume, coords, patch_size, brain_mask):
 
 
 def train_one_fold(train_patches, train_labels, test_patches, test_labels,
-                    epochs=15, batch_size=32, lr=1e-3, device="cpu", seed=0):
+                    epochs=15, batch_size=32, lr=1e-3, device="cpu", seed=0,
+                    model_factory=SimplePatchCNN):
     torch.manual_seed(seed)
-    model = SimplePatchCNN().to(device)
+    model = model_factory().to(device)
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     loss_fn = torch.nn.BCEWithLogitsLoss()
 
@@ -99,7 +100,7 @@ def run_hemisphere_experiment(
     t1_volume, label_volume, brain_mask, affine,
     patch_size=9, axis_index=0, margin_vox=None,
     max_voxels_per_side=1500, epochs=15, out_dir="results", subject_name="subject",
-    device="cpu", seed=0,
+    device="cpu", seed=0, model_factory=SimplePatchCNN,
 ):
     """
     Runs both fold directions (side A train / side B test, and reverse) for
@@ -155,7 +156,7 @@ def run_hemisphere_experiment(
         model, history, test_pred, test_probs = train_one_fold(
             used_patches[train_idx], used_labels[train_idx],
             used_patches[test_idx], used_labels[test_idx],
-            epochs=epochs, device=device, seed=seed,
+            epochs=epochs, device=device, seed=seed, model_factory=model_factory,
         )
         viz.plot_training_curves(
             history, f"{subject_name}: {fold_name}",
