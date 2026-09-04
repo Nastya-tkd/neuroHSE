@@ -244,25 +244,59 @@ and structural+condition-BOLD models (8 results total): accuracy 0.494-0.532
 throughout - no meaningful movement from the 5-subject result, and nowhere
 near the supervisor's 0.65-0.70 target range.
 
+## Two more follow-ups: bigger patch, and regression on continuous CMRO2
+
+Both per direct user request, both on the same 25-subject pooled cohort,
+in one combined run (`scripts/run_pooled_extended.py`) so they're directly
+comparable to each other and to the results above.
+
+**Bigger patch (whole-ROI-scale context).** patch_size 15
+(~30x30x50mm physical, given the 2x2x3.3mm voxel spacing) alongside the
+original 9 (~18x18x30mm) - the fallback the supervisor's own plan names
+once "just add more data" isn't the answer. Classification accuracy:
+0.503-0.535 at patch=9, 0.500-0.533 at patch=15 - indistinguishable, no
+improvement from more spatial context.
+
+**Regression on continuous CMRO2_percchange**
+(`src/train.py:train_one_fold_regression`) instead of the binary
+concordant/discordant label - predicts the actual magnitude/direction of
+metabolic change rather than just its sign-agreement with BOLD, so it
+keeps information the binary label throws away. Verified on synthetic data
+first (intensity-encoding patches recover R2 > 0.5, confirming the training
+loop itself works). On the real data: **R2 is at or below zero everywhere**
+(-0.037 to -0.000, both patch sizes, both contrasts, both fold directions)
+- not just "no better than chance" like the classification results, but
+*worse than predicting the training-set mean for every test voxel*.
+Correlation between predicted and true values: -0.02 to 0.005, i.e. none.
+This is if anything a more decisive null than the classification numbers:
+a model with zero real signal but some capacity to overfit would still
+often land at R2 near (not below) zero on a fresh test half, so consistently
+negative R2 across every condition says the little bit the model does
+"learn" from the training hemisphere actively fails to generalize to the
+other hemisphere, in every configuration tried.
+
 ### Where this leaves the project
 
-Across 88 real training runs total (Experiments 1-2 plus the pooled cohort),
-spanning 3 architectures, both raw and condition-averaged BOLD features,
-5-to-25 real subjects, 2 independent task contrasts, and a leakage-safe
-split every time, nothing has beaten chance by a meaningful margin. Neither
-more data nor a richer BOLD feature moved the needle - which argues more
-strongly than the 5-subject result alone that the ceiling isn't sample size
-or feature engineering. That is a real, well-powered negative result for
-"per-voxel concordant/discordant status is predictable from a small local
-patch of structural T1 (+ that voxel's own task BOLD response)" as
-currently posed. It does not mean the broader hypothesis (structure relates
-to hemodynamic coupling mode at all) is false - concrete things not yet
-tried: larger spatial context (whole-ROI/parcel-level features instead of a
-small local cube - the supervisor's own plan mentions this as the fallback
-after "just add more data" isn't the answer), the remaining 11+5 subjects
-once their derivatives layout is handled, or a fundamentally different
-target (e.g. predicting the continuous CMRO2_percchange value via
-regression instead of thresholding it to a sign).
+Across 104 real training runs total (Experiments 1-2, the pooled cohort,
+and this extended run), spanning 3 architectures, both raw and
+condition-averaged BOLD features, 2 patch sizes, both classification and
+regression framings, 5-to-25 real subjects, 2 independent task contrasts,
+and a leakage-safe split every time, nothing has beaten chance by a
+meaningful margin - and the regression framing did *worse* than chance
+(negative R2), the most unambiguous null of everything tried. Neither more
+data, a richer BOLD feature, more spatial context, nor a magnitude-
+preserving target moved the needle. That is a real, thoroughly-tested
+negative result for "a voxel's local structural (+ task-BOLD) neighborhood
+predicts its CMRO2 response" as currently posed, at the scales tried (up to
+~30x30x50mm patches). It does not mean the broader hypothesis (structure
+relates to hemodynamic coupling mode at all) is false - what's left
+genuinely untried: features at a full anatomical-parcel scale using a real
+brain atlas (bigger than the 15-voxel patch tested here, and anatomically
+meaningful rather than just a bigger cube), the remaining 15 subjects once
+their derivatives layout is handled (11 with a different naming scheme, 5
+with one specific missing file each), or looking beyond structure/BOLD
+entirely at variables this project hasn't touched (e.g. age, sex, Hct -
+already in `participants.tsv`).
 
 Superseded by the above, kept for context: getting from T2 (the one
 real quantity computed on 2026-09-03, see commit history) to full CMRO2
