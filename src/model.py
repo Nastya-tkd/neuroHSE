@@ -301,3 +301,27 @@ class PatchBOLDConditionNet(nn.Module):
         bold_feat = self.bold_branch(bold_feat)
         combined = torch.cat([patch_feat, bold_feat], dim=1)
         return self.classifier(combined).squeeze(-1)
+
+
+class PretrainedFeatureHead(nn.Module):
+    """Small MLP classifier over pre-extracted MedicalNet ResNet50 trunk
+    features (2048-dim, global-average-pooled) - trained fresh on our task,
+    the trunk itself stays frozen (feature extraction is a separate,
+    one-time step, see src/medicalnet_resnet.extract_backbone_features).
+    Plugs into src/train.py:train_one_fold like any other model_factory:
+    x is (N, 2048) instead of (N, 1, p, p, p), everything else is generic."""
+
+    def __init__(self, in_dim=2048, hidden=256):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, hidden),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.4),
+            nn.Linear(hidden, hidden // 4),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(hidden // 4, 1),
+        )
+
+    def forward(self, x):
+        return self.net(x).squeeze(-1)
