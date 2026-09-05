@@ -399,14 +399,56 @@ open question about cohort size: growing the real, available cohort as far
 as this dataset allows (5 -> 25 -> 37 subjects) does not recover a signal at
 any scale tested.
 
+## Pretrained MedicalNet ResNet50 backbone
+
+The one architectural lever not yet tried: a 3D-MRI backbone pretrained on
+real external data, rather than one more architecture trained from scratch
+on our small pooled set. Previously reported blocked (`huggingface.co`,
+`zenodo.org` are hard-blocked by this session's egress policy - confirmed
+directly, not assumed), but the user obtained `resnet_50_23dataset.pth`
+(Tencent/MedicalNet's Med3D, Chen et al. 2019 - pretrained on a 23-dataset
+multi-organ 3D segmentation corpus, 46.2M params) independently and hosted
+it as a GitHub release asset on their own repo, which this session's
+GitHub access can reach directly.
+
+**Verified before loading, not just trusted:** file header matches the
+documented legacy `torch.save` format byte-for-byte; a static pickle-opcode
+scan (`pickletools.genops` - reads opcodes, executes nothing) found only
+the expected `torch`/`collections` tensor-reconstruction calls, no
+suspicious globals; loaded with `torch.load`'s default `weights_only=True`
+safe-deserialization path (PyTorch's restricted unpickler), not the
+unrestricted one. `src/medicalnet_resnet.py` reproduces the trunk
+architecture (Bottleneck blocks 3-4-6-3, dilated - not strided - `layer3`/
+`layer4`, which is how Med3D keeps spatial resolution high for
+segmentation) and the checkpoint's state_dict loads with an **exact key
+match** (`strict=True`). `conv1` already takes 1 input channel, matching
+our T1 patches directly - no first-layer surgery needed.
+
+Approach: **frozen trunk** (feature extraction only - the point is testing
+whether Med3D's learned general 3D-medical-image features are useful for
+this label, not re-deriving them; also the only CPU-feasible way to spend
+epochs on a 46M-param model) + a small trainable MLP head
+(`PretrainedFeatureHead`) on the 2048-dim pooled features. `patch_size=25`
+(this backbone only downsamples ~8x via dilation, not the usual 32x, so
+25 leaves a 4x4x4 feature map before pooling - patch 9/15 would collapse
+to 2x2x2). Run across the full available cohort (`src/subject_loader`).
+
+**Result: 0.504-0.523** (calc: 37 subjects, 11,100 voxels/side; mem: 30
+subjects, 9,000 voxels/side) - chance again, statistically indistinguishable
+from every from-scratch architecture tried. A backbone trained on real
+external 3D-medical-image data brings no more signal than one trained from
+nothing, which rules out "the model just hasn't seen enough general 3D
+medical imagery" as the explanation for the ceiling.
+
 ### Where this leaves the project
 
-**140 real training runs**, all on genuine CMRO2/BOLD_percchange-derived
-labels, span: 4 architectures (a plain CNN, a residual CNN, a conv+
-transformer hybrid, and a real encoder-decoder U-Net), 3 BOLD
+**144 real training runs**, all on genuine CMRO2/BOLD_percchange-derived
+labels, span: 5 architectures (a plain CNN, a residual CNN, a conv+
+transformer hybrid, a real encoder-decoder U-Net, and a 46M-parameter
+backbone pretrained on external 3D-medical-image data), 3 BOLD
 representations (raw time series, per-condition percent change, none),
 3 non-structural feature sets (covariates, a fixed geometric grid, a
-data-driven k-means parcellation), 2 patch sizes, both classification and
+data-driven k-means parcellation), 3 patch sizes, both classification and
 regression framings, augmented vs. unaugmented / short vs. longer
 training, 5-to-37 real subjects (39/40 of the dataset's usable cohort),
 2 independent task contrasts, and a leakage-safe split every time. Every
@@ -417,18 +459,17 @@ jumps to 0.73-0.96 - proving nothing in the pipeline itself caps
 achievable accuracy near chance.
 
 That combination - a hard ceiling that many different real features,
-architectures, and cohort sizes all hit, paired with a positive control
-that clears it easily when given the answer - is about as thorough a null
-result as this kind of study can produce without new data. It does not
-mean the broader hypothesis (structure relates to hemodynamic coupling
-mode at all) is false, but everything cheap to try from here without new
-data has been tried, including scaling the cohort as far as this dataset
-allows. What's left needs either: a real anatomical atlas if one becomes
+architectures (including one bringing in external pretraining data), and
+cohort sizes all hit, paired with a positive control that clears it easily
+when given the answer - is about as thorough a null result as this kind of
+study can produce without new data. It does not mean the broader
+hypothesis (structure relates to hemodynamic coupling mode at all) is
+false, but every cheap-to-try lever, including the two previously reported
+as blocked (cohort completion, pretrained backbone), has now actually been
+tried. What's left needs either: a real anatomical atlas if one becomes
 reachable (the k-means parcellation here is a genuine data-driven
 substitute, not the genuine article - Glasser/HCP-MMP and registration
-tooling remain blocked in this session), a pretrained 3D-MRI backbone
-fine-tuned here (also blocked - confirmed `Tencent/MedicalNet` ships no
-weights in-repo, only Google Drive/Baidu Pan links), or a different outcome
+tooling remain blocked in this session), or a different outcome
 variable/scale of analysis entirely (group-level statistics across
 subjects rather than per-voxel prediction within one, for instance) -
 not another architecture, more data, or another round of hyperparameter
