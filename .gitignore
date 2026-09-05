@@ -1,7 +1,9 @@
 data/
 results/
+pretrained_weights/
 *.nii
 *.nii.gz
+*.pth
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
