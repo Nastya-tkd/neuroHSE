@@ -472,46 +472,98 @@ but something at a different spatial/temporal scale (dynamic
 neurovascular coupling response, not static baseline; or region identity
 rather than a local patch, per the atlas discussion below).
 
+## Real Glasser/HCP-MMP1.0 atlas: the last thing said to be blocked
+
+Every earlier version of this report said a real anatomical atlas was
+genuinely blocked - not just externally (Zenodo/HuggingFace/OSF/NITRC),
+but confirmed absent from this dataset's own derivatives too, unlike the
+MedicalNet weights or CBF/OEF. That turned out to be true of *this*
+dataset specifically, but not of the atlas itself: HCP-MMP1.0 is a
+static, unlicensed group-level label volume, and a plain-file mirror of
+it exists in a GitHub repo
+(`github.com/mbedini/The-HCP-MMP1.0-atlas-in-FSL`) - a host already
+reachable in this session, the same way the pretrained backbone and the
+atlas README itself were found. No S3 version-history trick or
+user-provided release needed this time, just a different kind of search.
+
+Getting it into each subject's own space still needed real image
+registration (the atlas is defined in a standard template's space, not
+any individual subject's). `src/glasser_atlas.py` runs ANTsPy (PyPI,
+no local FSL/FreeSurfer install needed) SyN registration against a
+nilearn-bundled MNI152 T1 template (also no network fetch - shipped with
+the package) and warps the atlas into each subject's T2-space grid with
+nearest-neighbor/label-aware interpolation, ~7s/subject.
+
+**Honesty caveats, stated up front:** (1) the atlas's own maintainer
+explicitly warns that HCP-MMP1.0 was built and validated for
+*surface-based* registration (FreeSurfer + Connectome Workbench), and
+that using it via volumetric MNI registration - the only option available
+in this sandboxed session - introduces real boundary imprecision (citing
+Coalson, Van Essen & Glasser 2018, PNAS). (2) the atlas was mapped onto
+an ICBM2009c-like template, while the template registered against here is
+a different (though closely related) MNI152 variant - a second source of
+approximation. This is a coarse volumetric approximation of Glasser, not
+the methodologically preferred version - reported as exactly that, the
+same way the k-means parcellation and coarse grid were.
+
+**Validated before trusting it**, not just run once: checked on sub-p019
+that warped parcel boundaries visually track the cortical ribbon in T1
+(`atlas_cache/sub-p019_glasser_check.png`) across several slices, and that
+Dice(atlas>0, brain mask) = 0.64 - expected well under 1.0 since Glasser
+labels cortex only, not the whole brain mask (white matter, subcortex,
+CSF).
+
+Same methodology as the k-means parcellation (`scripts/run_glasser.py`
+mirrors `run_parcellation.py`): each labeled voxel gets a 3-feature
+descriptor (mean T1, T1 std, log-size) of the real Glasser parcel it
+falls in - computed separately per hemisphere-split side, so nothing
+leaks across the train/test boundary - fed through `PatchBOLDConditionNet`.
+39/40 subjects (18,500 calc / 15,000 mem pooled voxels/side).
+
+**Result: 0.510-0.523** - chance again, and close to the k-means
+parcellation's 0.502-0.523. Real, group-consistent anatomical identity
+(not just a data-driven local cluster) still doesn't separate from chance
+in this pipeline - even with the one ingredient every earlier version of
+this report treated as the last real unknown.
+
 ### Where this leaves the project
 
-**148 real training runs**, all on genuine CMRO2/BOLD_percchange-derived
+**152 real training runs**, all on genuine CMRO2/BOLD_percchange-derived
 labels, span: 5 architectures (a plain CNN, a residual CNN, a conv+
 transformer hybrid, a real encoder-decoder U-Net, and a 46M-parameter
 backbone pretrained on external 3D-medical-image data), 4 structural/
 physiological input types (T1 alone, T1 + raw/condition BOLD, T1 +
-baseline CBF/OEF), 3 non-structural feature sets (covariates, a fixed
-geometric grid, a data-driven k-means parcellation), 3 patch sizes, both
-classification and regression framings, augmented vs. unaugmented / short
-vs. longer training, 5-to-37 real subjects (39/40 of the dataset's usable
-cohort), 2 independent task contrasts, and a leakage-safe split every
-time. Every configuration lands at 0.48-0.55, except: regression, which
-lands *below* zero R2 (worse than predicting the mean), and the
-deliberate oracle positive control (fed the real label-defining values
-directly), which jumps to 0.73-0.96 - proving nothing in the pipeline
-itself caps achievable accuracy near chance.
+baseline CBF/OEF), 4 non-structural feature sets (covariates, a fixed
+geometric grid, a data-driven k-means parcellation, and now a real
+anatomical atlas), 3 patch sizes, both classification and regression
+framings, augmented vs. unaugmented / short vs. longer training, 5-to-39
+real subjects (39/40 of the dataset's usable cohort), 2 independent task
+contrasts, and a leakage-safe split every time. Every configuration lands
+at 0.48-0.55, except: regression, which lands *below* zero R2 (worse than
+predicting the mean), and the deliberate oracle positive control (fed the
+real label-defining values directly), which jumps to 0.73-0.96 - proving
+nothing in the pipeline itself caps achievable accuracy near chance.
 
 That combination - a hard ceiling that many different real features
 (including physiological baseline maps physically upstream of the label,
-not just anatomical intensity), architectures (including one bringing in
-external pretraining data), and cohort sizes all hit, paired with a
-positive control that clears it easily when given the answer - is about
-as thorough a null result as this kind of study can produce without new
-data. It does not mean the broader hypothesis (structure relates to
-hemodynamic coupling mode at all) is false, but every cheap-to-try lever
-in this dataset, including three previously reported as blocked or
-untried (cohort completion, pretrained backbone, baseline CBF/OEF), has
-now actually been tried. What's left needs either: a real anatomical
-atlas if one becomes reachable (the k-means parcellation here is a
-genuine data-driven substitute, not the genuine article - Glasser/HCP-MMP
-and registration tooling remain blocked in this session, and no atlas or
-parcel file exists anywhere in this dataset's own derivatives either -
-confirmed directly, not assumed), a dynamic rather than static
-physiological input (task-period CBF/OEF *change*, not baseline - a
-different, not-yet-tried idea), or a different outcome variable/scale of
-analysis entirely (group-level statistics across subjects rather than
-per-voxel prediction within one, for instance) - not another
-architecture, more data, or another round of hyperparameter tuning on
-the same input.
+and now real group-level anatomical region identity, not just local
+intensity), architectures (including one bringing in external pretraining
+data), and cohort sizes all hit, paired with a positive control that
+clears it easily when given the answer - is about as thorough a null
+result as this kind of study can produce without new data. It does not
+mean the broader hypothesis (structure relates to hemodynamic coupling
+mode at all) is false, but every lever this dataset and this session's
+tooling can reach, including four previously reported as blocked or
+untried (cohort completion, pretrained backbone, baseline CBF/OEF, and
+now the real atlas itself), has now actually been tried. What's left
+needs either: a dynamic rather than static physiological input
+(task-period CBF/OEF *change*, not baseline - a different, not-yet-tried
+idea), a surface-based rather than volumetric use of the atlas (would
+need FreeSurfer, not available here), or a different outcome
+variable/scale of analysis entirely (group-level statistics across
+subjects rather than per-voxel prediction within one, for instance) -
+not another architecture, more data, or another round of hyperparameter
+tuning on the same input.
 
 Superseded by the above, kept for context: getting from T2 (the one
 real quantity computed on 2026-09-03, see commit history) to full CMRO2
