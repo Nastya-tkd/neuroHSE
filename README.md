@@ -440,40 +440,78 @@ external 3D-medical-image data brings no more signal than one trained from
 nothing, which rules out "the model just hasn't seen enough general 3D
 medical imagery" as the explanation for the ceiling.
 
+## Baseline CBF/OEF: physiological structure, not anatomy
+
+The one lever left that wasn't blocked at all. T1 intensity reflects
+tissue composition (myelin/water/macromolecule content) - it does not
+directly encode the physiological quantities that mechanically determine
+whether BOLD and CMRO2 move together or oppositely (baseline perfusion,
+baseline oxygen extraction). Those quantities turned out to already be
+sitting in this dataset's own derivatives, unused: `sub-*_task-control_
+space-T2_cbf.nii` and `..._oef.nii`, the baseline CBF/OEF maps the source
+pipeline itself used to compute CMRO2 (Fick's principle:
+CMRO2 = CBF x OEF x CaO2) - recoverable via the same S3 version-history
+mechanism as everything else, no external host involved.
+
+**Non-circularity check:** only *control*-condition (resting) CBF/OEF
+were used, never task-condition values - the label is defined by the
+*change* between task and control, so a baseline map alone isn't part of
+that computation. `scripts/run_cbf_oef.py` extracts co-registered 3-channel
+patches (T1 + baseline CBF + baseline OEF, each independently normalized -
+their physical units and scales aren't comparable) and trains
+`SimplePatchCNN(in_channels=3)`, compared directly against the same
+architecture on T1-only patches, on the identical voxels.
+
+**Result: 0.502-0.522 (T1-only) vs. 0.507-0.516 (T1+baseline CBF/OEF)** -
+no meaningful separation; both ranges overlap and sit at chance. Even
+physiological quantities upstream of the label's own definition (the
+components CMRO2 itself is built from) don't move the needle when given
+only as a local baseline snapshot around each voxel - a further hint that
+the missing ingredient may not be "the right kind of local map" at all,
+but something at a different spatial/temporal scale (dynamic
+neurovascular coupling response, not static baseline; or region identity
+rather than a local patch, per the atlas discussion below).
+
 ### Where this leaves the project
 
-**144 real training runs**, all on genuine CMRO2/BOLD_percchange-derived
+**148 real training runs**, all on genuine CMRO2/BOLD_percchange-derived
 labels, span: 5 architectures (a plain CNN, a residual CNN, a conv+
 transformer hybrid, a real encoder-decoder U-Net, and a 46M-parameter
-backbone pretrained on external 3D-medical-image data), 3 BOLD
-representations (raw time series, per-condition percent change, none),
-3 non-structural feature sets (covariates, a fixed geometric grid, a
-data-driven k-means parcellation), 3 patch sizes, both classification and
-regression framings, augmented vs. unaugmented / short vs. longer
-training, 5-to-37 real subjects (39/40 of the dataset's usable cohort),
-2 independent task contrasts, and a leakage-safe split every time. Every
-configuration lands at 0.48-0.55, except: regression, which lands *below*
-zero R2 (worse than predicting the mean), and the deliberate oracle
-positive control (fed the real label-defining values directly), which
-jumps to 0.73-0.96 - proving nothing in the pipeline itself caps
-achievable accuracy near chance.
+backbone pretrained on external 3D-medical-image data), 4 structural/
+physiological input types (T1 alone, T1 + raw/condition BOLD, T1 +
+baseline CBF/OEF), 3 non-structural feature sets (covariates, a fixed
+geometric grid, a data-driven k-means parcellation), 3 patch sizes, both
+classification and regression framings, augmented vs. unaugmented / short
+vs. longer training, 5-to-37 real subjects (39/40 of the dataset's usable
+cohort), 2 independent task contrasts, and a leakage-safe split every
+time. Every configuration lands at 0.48-0.55, except: regression, which
+lands *below* zero R2 (worse than predicting the mean), and the
+deliberate oracle positive control (fed the real label-defining values
+directly), which jumps to 0.73-0.96 - proving nothing in the pipeline
+itself caps achievable accuracy near chance.
 
-That combination - a hard ceiling that many different real features,
-architectures (including one bringing in external pretraining data), and
-cohort sizes all hit, paired with a positive control that clears it easily
-when given the answer - is about as thorough a null result as this kind of
-study can produce without new data. It does not mean the broader
-hypothesis (structure relates to hemodynamic coupling mode at all) is
-false, but every cheap-to-try lever, including the two previously reported
-as blocked (cohort completion, pretrained backbone), has now actually been
-tried. What's left needs either: a real anatomical atlas if one becomes
-reachable (the k-means parcellation here is a genuine data-driven
-substitute, not the genuine article - Glasser/HCP-MMP and registration
-tooling remain blocked in this session), or a different outcome
-variable/scale of analysis entirely (group-level statistics across
-subjects rather than per-voxel prediction within one, for instance) -
-not another architecture, more data, or another round of hyperparameter
-tuning on the same input.
+That combination - a hard ceiling that many different real features
+(including physiological baseline maps physically upstream of the label,
+not just anatomical intensity), architectures (including one bringing in
+external pretraining data), and cohort sizes all hit, paired with a
+positive control that clears it easily when given the answer - is about
+as thorough a null result as this kind of study can produce without new
+data. It does not mean the broader hypothesis (structure relates to
+hemodynamic coupling mode at all) is false, but every cheap-to-try lever
+in this dataset, including three previously reported as blocked or
+untried (cohort completion, pretrained backbone, baseline CBF/OEF), has
+now actually been tried. What's left needs either: a real anatomical
+atlas if one becomes reachable (the k-means parcellation here is a
+genuine data-driven substitute, not the genuine article - Glasser/HCP-MMP
+and registration tooling remain blocked in this session, and no atlas or
+parcel file exists anywhere in this dataset's own derivatives either -
+confirmed directly, not assumed), a dynamic rather than static
+physiological input (task-period CBF/OEF *change*, not baseline - a
+different, not-yet-tried idea), or a different outcome variable/scale of
+analysis entirely (group-level statistics across subjects rather than
+per-voxel prediction within one, for instance) - not another
+architecture, more data, or another round of hyperparameter tuning on
+the same input.
 
 Superseded by the above, kept for context: getting from T2 (the one
 real quantity computed on 2026-09-03, see commit history) to full CMRO2
