@@ -645,6 +645,76 @@ parcellation's 0.502-0.523. Real, group-consistent anatomical identity
 in this pipeline - even with the one ingredient every earlier version of
 this report treated as the last real unknown.
 
+## ROI-averaged classification: the direct, cheap follow-up to Buchel et al.
+
+If a large share of this project's null result is individual-voxel label
+noise (as section "Independent literature context" above documents), the
+most direct next test isn't another architecture or feature - it's
+changing the *unit of classification* from voxel to region, since
+averaging within a real anatomical region over dozens of voxels
+mechanically suppresses exactly that kind of noise (the same statistical
+logic behind why group/ROI-level neuroimaging analyses are more reliable
+than single-voxel ones).
+
+`scripts/run_roi_averaged.py` reuses the same registered Glasser parcels
+(`src/glasser_atlas.py`, already cached from the atlas experiment above)
+and, per subject per contrast per parcel with >=20 valid voxels: averages
+raw CMRO2_task and CMRO2_control across the parcel first, *then* takes
+one ROI-level percent change (the standard way to compute an ROI
+contrast - one ratio of two averaged quantities, not an average of many
+noisy per-voxel ratios), and separately averages BOLD_percchange. The ROI
+label is the sign product of those two region-level numbers, same
+definition as everywhere else in this project. Classifies each region
+from its own structural profile (mean T1, T1 std, log-size - the same 3
+features as the voxel-level Glasser experiment) via a small MLP
+(`RegionMLP` in `src/model.py`) rather than a 3D CNN, since the unit here
+is a region summary, not a spatial patch - `train_one_fold` already
+handles this without modification, since a model's forward signature was
+always generic.
+
+**Result: 0.522-0.567** (calc: 37 subjects, ~5,700-6,050 ROIs/side; mem:
+30 subjects, ~4,580-4,920 ROIs/side) - the highest range of any
+structural-only experiment in this project, and the first to poke
+slightly above the 0.48-0.55 band nearly everything else has landed in
+(mem, A-train-B-test: 0.567). Still nowhere near the 0.65-0.70 target,
+and with only 2 folds per contrast this should not be over-read as a
+breakthrough - but it moves in exactly the direction the Buchel et al.
+explanation predicts, and by a similar or slightly larger margin than
+the more conservative reliability-filtering test above. Of everything
+tried in this project, region-level averaging is the single result
+closest to "worth a closer, better-powered look" rather than a clean
+null.
+
+### Reliability x positive-BOLD double filter
+
+Buchel et al.'s reanalysis made two findings, not one: most voxels are
+unclassifiable, but *where classification was possible*, positive BOLD
+responses were predominantly concordant while discordance concentrated
+in negative-BOLD voxels. `scripts/run_reliability_double_filter.py`
+combines both into one filter (on top of the single-filter experiment
+above): `positive_bold_top50pct` keeps only voxels with BOLD_percchange
+> 0 *and* in the top 50% by |CMRO2_percchange| magnitude, alongside
+`all`, `top50pct`, and `positive_bold`-only for reference, same
+architecture (SimplePatchCNN, patch=9, T1-only) and leakage-safe
+protocol as the single-filter test.
+
+<!-- DOUBLE_FILTER_RESULT -->
+
+### 3-class framing: concordant / discordant / unreliable
+
+Rather than silently forcing every voxel into a binary call (implicitly
+asserting every voxel has a knowable sign) or silently dropping the
+unreliable ones (as the filtering experiments above do),
+`scripts/run_three_class.py` gives the model an explicit third class -
+the bottom half of each fold's training voxels by |CMRO2_percchange| -
+and asks it to distinguish concordant / discordant / unreliable directly
+(`SimplePatchCNN` with `n_classes=3`, `CrossEntropyLoss`, chance = 1/3).
+Also reports binary sign-accuracy restricted to voxels that were
+*actually* reliable in the test set, for comparability with the rest of
+this project's binary-accuracy numbers.
+
+<!-- THREE_CLASS_RESULT -->
+
 ### Where this leaves the project
 
 **164 real training runs**, all on genuine CMRO2/BOLD_percchange-derived
