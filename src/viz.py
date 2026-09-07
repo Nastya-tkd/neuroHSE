@@ -99,6 +99,28 @@ def plot_confusion_and_roc(y_true, y_pred, y_score, title, out_path):
     plt.close(fig)
 
 
+def plot_multiclass_confusion(y_true, y_pred, class_names, title, out_path):
+    """Generic n-class confusion matrix (used by the 3-class
+    concordant/discordant/unreliable framing - plot_confusion_and_roc
+    above is hardcoded to 2 classes plus an ROC curve, which doesn't
+    apply once there's a third class)."""
+    n = len(class_names)
+    fig, ax = plt.subplots(figsize=(4.2, 4.2))
+    cm = confusion_matrix(y_true, y_pred, labels=list(range(n)))
+    ax.imshow(cm, cmap="Blues")
+    ax.set_xticks(range(n)); ax.set_xticklabels(class_names, fontsize=8, rotation=30, ha="right")
+    ax.set_yticks(range(n)); ax.set_yticklabels(class_names, fontsize=8)
+    ax.set_xlabel("predicted"); ax.set_ylabel("true")
+    for i in range(n):
+        for j in range(n):
+            ax.text(j, i, str(cm[i, j]), ha="center", va="center",
+                     color="white" if cm[i, j] > cm.max() / 2 else "black", fontsize=9)
+    ax.set_title(title, fontsize=10)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+
+
 def plot_fold_accuracy_summary(fold_results, out_path):
     """fold_results: dict[fold_name] -> test accuracy."""
     fig, ax = plt.subplots(figsize=(5, 3.5))

@@ -11,9 +11,10 @@ import torch.nn.functional as F
 
 
 class SimplePatchCNN(nn.Module):
-    def __init__(self, in_channels=1, base_channels=8):
+    def __init__(self, in_channels=1, base_channels=8, n_classes=1):
         super().__init__()
         c = base_channels
+        self.n_classes = n_classes
         self.features = nn.Sequential(
             nn.Conv3d(in_channels, c, kernel_size=3, padding=1),
             nn.BatchNorm3d(c),
@@ -29,13 +30,16 @@ class SimplePatchCNN(nn.Module):
             nn.Linear(c * 2, c * 2),
             nn.ReLU(inplace=True),
             nn.Dropout(0.3),
-            nn.Linear(c * 2, 1),
+            nn.Linear(c * 2, n_classes),
         )
 
     def forward(self, x):
-        """x: (N, 1, p, p, p) -> logits (N,)"""
+        """x: (N, 1, p, p, p) -> binary logits (N,) if n_classes=1,
+        else multi-class logits (N, n_classes) - used by the 3-class
+        concordant/discordant/unreliable framing."""
         x = self.features(x)
-        return self.classifier(x).squeeze(-1)
+        out = self.classifier(x)
+        return out.squeeze(-1) if self.n_classes == 1 else out
 
 
 class DeeperPatchCNN(nn.Module):
