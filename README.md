@@ -558,7 +558,38 @@ all voxels / top 50% / top 25% by magnitude, same subjects and patches,
 threshold fit on each fold's training side only so nothing about test
 labels leaks into the cutoff.
 
-<!-- RELIABILITY_FILTERED_RESULT -->
+**Result (structural-only accuracy, T1 patch=9, mean across the 4
+contrast/fold combinations):**
+
+| Inclusion tier | Mean accuracy | Per-combination range |
+|---|---|---|
+| All voxels (this project's baseline all along) | 0.507 | 0.490-0.522 |
+| Top 50% by \|CMRO2_percchange\| | 0.524 | 0.515-0.532 |
+| Top 25% by \|CMRO2_percchange\| | 0.513 | 0.504-0.523 |
+
+Filtering to the top 50% raised accuracy in **all 4 of 4** contrast/fold
+combinations relative to the unfiltered set - a small but consistent
+bump, in the direction the Buchel et al. explanation predicts. It is
+not, however, a clean monotonic trend: tightening further to the top 25%
+*dropped back down* in 2 of 4 combinations rather than improving further,
+and training/test set sizes there are roughly a quarter of the unfiltered
+size (~3,500-4,900 voxels vs. ~15,000-18,500), wide enough on their own
+to make single-run accuracy noisy at this scale.
+
+**Honest reading:** modest, partial support for the reliability
+explanation - a real, consistently-directioned effect of filtering by
+estimate magnitude, but far too small (0.507 to 0.524, both still deep
+inside this project's 0.48-0.55 chance band) and too non-monotonic to
+claim it resolves the null result on its own. It's compatible with a
+mixture explanation: some real fraction of the "no signal" result is
+label noise exactly as Buchel et al. describe, but not all of it - the
+best subset here (top 50%) still falls far short of the supervisor's
+0.65-0.70 target, so a genuine structural/physiological ceiling likely
+still exists underneath the label noise, not just noise alone. This is
+the most direct, literature-motivated test this project could run with
+its own data and pipeline, and it neither confirms nor cleanly refutes
+the explanation - a fair, disclosed result rather than a forced
+conclusion either way.
 
 ## Real Glasser/HCP-MMP1.0 atlas: the last thing said to be blocked
 
@@ -616,42 +647,61 @@ this report treated as the last real unknown.
 
 ### Where this leaves the project
 
-**152 real training runs**, all on genuine CMRO2/BOLD_percchange-derived
+**164 real training runs**, all on genuine CMRO2/BOLD_percchange-derived
 labels, span: 5 architectures (a plain CNN, a residual CNN, a conv+
 transformer hybrid, a real encoder-decoder U-Net, and a 46M-parameter
-backbone pretrained on external 3D-medical-image data), 4 structural/
+backbone pretrained on external 3D-medical-image data), 5 structural/
 physiological input types (T1 alone, T1 + raw/condition BOLD, T1 +
-baseline CBF/OEF), 4 non-structural feature sets (covariates, a fixed
-geometric grid, a data-driven k-means parcellation, and now a real
-anatomical atlas), 3 patch sizes, both classification and regression
-framings, augmented vs. unaugmented / short vs. longer training, 5-to-39
-real subjects (39/40 of the dataset's usable cohort), 2 independent task
-contrasts, and a leakage-safe split every time. Every configuration lands
-at 0.48-0.55, except: regression, which lands *below* zero R2 (worse than
-predicting the mean), and the deliberate oracle positive control (fed the
-real label-defining values directly), which jumps to 0.73-0.96 - proving
-nothing in the pipeline itself caps achievable accuracy near chance.
+baseline CBF/OEF, T1 + dynamic task-period dCBF/dOEF), 4 non-structural
+feature sets (covariates, a fixed geometric grid, a data-driven k-means
+parcellation, and a real anatomical atlas), 3 label-reliability tiers
+(all voxels, top 50%, top 25% by \|CMRO2_percchange\|), 3 patch sizes,
+both classification and regression framings, augmented vs. unaugmented /
+short vs. longer training, 5-to-39 real subjects (39/40 of the dataset's
+usable cohort), 2 independent task contrasts, and a leakage-safe split
+every time. Nearly every configuration lands at 0.48-0.55, except:
+regression, which lands *below* zero R2 (worse than predicting the
+mean); the deliberate oracle positive control (fed the real
+label-defining values directly), which jumps to 0.73-0.96; and the
+reliability-filtered top-50% subset, which nudges to a mean 0.524 -
+still inside the same band, not a break from it.
 
 That combination - a hard ceiling that many different real features
 (including physiological baseline maps physically upstream of the label,
-and now real group-level anatomical region identity, not just local
+and real group-level anatomical region identity, not just local
 intensity), architectures (including one bringing in external pretraining
 data), and cohort sizes all hit, paired with a positive control that
 clears it easily when given the answer - is about as thorough a null
-result as this kind of study can produce without new data. It does not
-mean the broader hypothesis (structure relates to hemodynamic coupling
-mode at all) is false, but every lever this dataset and this session's
-tooling can reach, including four previously reported as blocked or
-untried (cohort completion, pretrained backbone, baseline CBF/OEF, and
-now the real atlas itself), has now actually been tried. What's left
-needs either: a dynamic rather than static physiological input
-(task-period CBF/OEF *change*, not baseline - a different, not-yet-tried
-idea), a surface-based rather than volumetric use of the atlas (would
-need FreeSurfer, not available here), or a different outcome
-variable/scale of analysis entirely (group-level statistics across
-subjects rather than per-voxel prediction within one, for instance) -
-not another architecture, more data, or another round of hyperparameter
-tuning on the same input.
+result as this kind of study can produce without new data. Every lever
+this dataset and this session's tooling can reach - cohort completion,
+pretrained backbone, baseline and dynamic CBF/OEF, and the real atlas
+itself, all previously reported as blocked or untried - has now actually
+been tried.
+
+**What most changes the picture isn't another lever, though - it's the
+literature context found along the way.** An independent, peer-reviewed
+reanalysis of this exact dataset's own methodology (Buchel et al. 2026,
+challenging Epp et al. 2025 - the source of this project's label; see
+above) found that 77.2% of voxels can't be robustly classified as
+concordant/discordant once the statistical uncertainty of the CMRO2
+estimates is accounted for. This project's own reliability-filtered test
+of that explanation found modest, partial, non-monotonic support for
+it - real, but not enough on its own to explain the full null result.
+The most defensible current reading: the true ceiling for this task is
+some combination of real label noise (as Buchel et al. document
+independently) and a genuine absence of local structural/physiological
+signal at the scales tested here - not a failure of search effort. What's
+left needs either: a surface-based rather than volumetric use of the
+atlas (would need FreeSurfer, not available here), a proper
+statistical-uncertainty estimate per voxel (would need access to the
+original repeated-measures/trial-level data, not just the point-estimate
+maps used here, to replicate Buchel et al.'s test exactly rather than
+approximate it), or a different outcome variable/scale of analysis
+entirely (group-level statistics across subjects rather than per-voxel
+prediction within one, for instance, which would also naturally average
+away much of the per-voxel noise Buchel et al. describe) - not another
+architecture, more data, or another round of hyperparameter tuning on
+the same input.
 
 Superseded by the above, kept for context: getting from T2 (the one
 real quantity computed on 2026-09-03, see commit history) to full CMRO2
