@@ -216,7 +216,7 @@ def main():
             )
 
     with open(os.path.join(OUT_DIR, "all_results.json"), "w") as f:
-        json.dump({f"{c}|{f}": r for (c, f), r in all_results.items()}, f, indent=1)
+        json.dump({f"{c}|{f}": r for (c, f), r in all_results.items()}, f, indent=1, default=float)
 
     if all_results:
         fig, ax = plt.subplots(figsize=(7, 4.5))
