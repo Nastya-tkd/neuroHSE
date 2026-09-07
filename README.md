@@ -890,9 +890,31 @@ whenever a filter or reframing can shift the label's class balance** -
 this part of the report is what happens when that check is actually run
 on every result, not skipped because a number looked good.
 
+## 4-architecture ensemble - the last legitimate lever, tried and closed
+
+Not a new configuration search - a one-time, principled combination of
+architectures already established throughout this project as
+independently null (`SimplePatchCNN`, `DeeperPatchCNN`,
+`AttentionPatchCNN`, `PatchUNet`), soft-voted (averaged probabilities)
+on the exact same leakage-safe hemisphere split, structural-only, T1,
+patch=9. If four independently-null architectures make uncorrelated
+errors, averaging could in principle recover a weak shared signal none
+of them individually crosses their own majority-class baseline for -
+computed and reported from the start, same discipline as every
+experiment since the ROI-averaged correction.
+
+**Result: ensemble does not beat the majority-class baseline in any of
+the 4 combinations** (0.513 vs. 0.521; 0.517 vs. 0.522; 0.490 vs. 0.529;
+0.502 vs. 0.504) - and neither does any individual architecture feeding
+into it (all 16 individual architecture x fold results also sit at or
+below their fold's baseline). This closes the one item that stayed
+open after the class-imbalance correction: not "one more architecture
+might still help" but a direct, one-time test of exactly that question,
+with a clean negative answer.
+
 ### Where this leaves the project
 
-**204 real training runs**, all on genuine CMRO2/BOLD_percchange-derived
+**220 real training runs**, all on genuine CMRO2/BOLD_percchange-derived
 labels, span: 5 architectures (a plain CNN, a residual CNN, a conv+
 transformer hybrid, a real encoder-decoder U-Net, and a 46M-parameter
 backbone pretrained on external 3D-medical-image data), 5 structural/
@@ -960,6 +982,17 @@ session's tools - it would need new data (a dataset with denser
 repeated measures for genuine per-voxel uncertainty, or whole-brain T1
 coverage for surface reconstruction) or accepting the null result now on
 record as the answer this dataset gives.
+
+**A last, explicit check of that last claim** - a one-time, principled
+ensemble of the four architectures this project ever built (not a new
+search, see above) - confirms it: no combination of what already exists
+beats the ceiling either. At this point, further search over this
+dataset with this session's tools would not be thoroughness - repeating
+configurations against a result this consistent mainly raises the
+odds of a false positive by chance (the standard multiple-comparisons
+concern), not the odds of a real one. **220 runs is where this project
+stops treating "try one more thing" as the answer.** The result is the
+answer.
 
 Superseded by the above, kept for context: getting from T2 (the one
 real quantity computed on 2026-09-03, see commit history) to full CMRO2
