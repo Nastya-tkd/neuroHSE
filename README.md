@@ -769,80 +769,197 @@ flip. The model's only real behavior here is a bias toward predicting
 the majority class ("unreliable"); it shows no evidence of encoding the
 actual concordant-vs-discordant distinction at all.
 
-### A methodological note that applies to all four sections above
+## Three items previously called out of reach - reconsidered
 
-Every one of the four Buchel-motivated experiments above (reliability
-filtering, ROI-averaging, the double filter, 3-class) was checked
-against its own tier/fold's trivial majority-class baseline before its
-result was accepted - not just against 0.5 or 1/3. Two of them
-(reliability filtering, the double filter) were *first written up* with
-a more favorable reading and corrected in place once that check was run;
-the correction is left visible in each section rather than quietly
-edited away, including the single highest raw accuracy in this whole
-project (0.627, double filter) turning out to be indistinguishable from
-"always guess concordant." This is worth stating plainly for whoever
-reads this next: **raw accuracy is not evidence on its own whenever a
-filter or reframing can shift the label's class balance** - the four
-sections above are what happens when that check is actually run, not
-skipped because a number looked good.
+The closing synthesis of the previous version of this report named three
+things as needing resources outside this session: surface-based atlas
+processing (FreeSurfer), a genuine (non-proxy) per-voxel statistical-
+reliability estimate, and a group-level scale of analysis. Asked to
+actually attempt all three rather than take that assessment as final -
+one was confirmed genuinely blocked, with concrete evidence this time;
+the other two turned out reachable and were run.
+
+### FreeSurfer surface-based processing - confirmed blocked, not just assumed
+
+Checked directly rather than repeating the earlier assumption: FreeSurfer
+has no PyPI package (`pip index versions freesurfer` returns no match) -
+it ships as a large licensed binary distribution, not a Python library,
+from a host outside this session's reach. Independently of that, this
+dataset's own T1 images cover only 99mm along the inferior-superior axis
+(30 slices x 3.3mm) - short of the whole-brain coverage FreeSurfer's
+`recon-all` needs regardless of whether the software were available. Two
+separate, concrete reasons, not one assumption standing in for both.
+
+### A real (non-proxy) per-voxel reliability measure
+
+Reading the source pipeline's own analysis notebooks
+(`NeuroenergeticsLab/two_modes_of_hemodynamics`,
+`D_Fig2C_native_space_analysis.ipynb`) turned up
+`{sub}_1stlevel_{contrast}control_space-T2.nii.gz`: a genuine first-level
+GLM Z-statistic for the exact same task contrast used throughout this
+project - the pipeline itself thresholds it at `z=2.5` to define its own
+activation ROIs. This is real statistical evidence from the source GLM,
+not the `|CMRO2_percchange|` magnitude heuristic used earlier in this
+report - the most direct answer available to "what would a genuine
+reliability estimate show instead of a proxy."
+
+One data property had to be discovered and corrected for before the
+comparison was meaningful: this z-map only has nonzero values within its
+own processing mask - checked directly, only ~9% of this project's usual
+concordance-valid voxels overlap it. An earlier version of
+`scripts/run_zstat_reliability.py` ranked percentiles over the full,
+~91%-exact-zero population, which silently produced a threshold of zero
+and filtered nothing (visible immediately in the first run's log: every
+tier had identical sample sizes and accuracy) - fixed by restricting to
+the z-map's own covered voxels first, then ranking by \|z\| within that
+population, and by then computing each tier's majority-class baseline
+*from the start*, the lesson already learned from the four experiments
+above.
+
+**Result, with each tier's own majority baseline alongside it:**
+
+| Tier | Model accuracy (range) | Majority baseline (range) | Beats baseline? |
+|---|---|---|---|
+| Z-covered, unfiltered | 0.548-0.590 | 0.573-0.599 | No, in 4/4 |
+| Top 50% by \|z\| | 0.539-0.602 | 0.596-0.608 | 2/4 (margins of +0.0002, +0.0008 - noise) |
+| Top 25% by \|z\| | 0.544-0.622 | 0.590-0.628 | No, in 4/4 |
+
+Restricting to voxels the source pipeline's own GLM considers
+statistically significant activation raises both the model's accuracy
+and the majority-class baseline together (0.55-0.63 range, well above
+this project's usual 0.48-0.55 band) - the z-covered subset is real
+tissue with a real, substantially skewed concordance distribution, not
+noise. But the model does not clear its own baseline in 10 of 12
+combinations, and the 2 exceptions are margins of two-tenths and
+eight-hundredths of one percentage point - not distinguishable from
+chance at this sample size. A genuine, non-proxy reliability measure
+produces the same conclusion as the proxy one: no structural signal once
+correctly compared.
+
+### Group-level (cross-subject) analysis
+
+A scale of analysis this report had flagged since the Buchel et al.
+section but not yet attempted: not "does this voxel/region predict its
+own subject's concordance", but "does a real anatomical region's
+*population-level* tendency toward concordance correlate with that
+region's *population-level* structural profile" - one row per (Glasser
+parcel, hemisphere side), not per voxel or per subject.
+
+`scripts/run_group_level.py` reuses the ROI-averaging computation from
+earlier (raw CMRO2/BOLD averaged within each parcel per subject, one
+ROI-level label per subject per parcel), then for every parcel with
+contributions from >=15 subjects: takes the *majority vote* across
+subjects as that parcel's group-level label, and the population-average
+of each subject's own regional T1 profile as its group-level feature.
+362 parcels (182/180 per side) qualified, most with data from 30-37 of
+the ~37-39 usable subjects per contrast. Classified with `RegionMLP`,
+split by hemisphere side - and, learning directly from the ROI-averaged
+experiment's own earlier mistake, **the majority-class baseline was
+computed and reported alongside the very first result, not added after
+seeing a promising number.**
+
+**Result: model accuracy exactly equals the majority-class baseline in
+all 4 of 4 combinations** (0.606/0.606, 0.582/0.582, 0.711/0.711,
+0.632/0.632, to full floating-point precision). `RegionMLP` learned
+nothing from the population-average structural profile at all; group-
+level concordance is real and meaningfully skewed (59-67% concordant
+depending on contrast - itself a legitimate, if unsurprising,
+descriptive finding: most cortical regions lean concordant across this
+population), but no structural correlate of *which* regions lean which
+way was found. This is this project's cleanest null result of all -
+not a corrected overclaim, but a properly-baselined result from its
+first run.
+
+### A methodological note that applies to all seven sections above
+
+Every one of the seven Buchel-motivated or reconsideration experiments
+in this part of the report (reliability filtering, ROI-averaging, the
+double filter, 3-class, the real z-statistic filter, and group-level
+analysis) was checked against its own tier/fold's trivial majority-class
+baseline before its result was accepted - not just against 0.5 or 1/3.
+Two of them (reliability filtering, the double filter) were *first
+written up* with a more favorable reading and corrected in place once
+that check was run; the correction is left visible in each section
+rather than quietly edited away, including the single highest raw
+accuracy in this whole project (0.627, double filter) turning out to be
+indistinguishable from "always guess concordant." The remaining three
+(the real z-stat filter, group-level analysis, and technically 3-class)
+had the check built in from the start. This is worth stating plainly for
+whoever reads this next: **raw accuracy is not evidence on its own
+whenever a filter or reframing can shift the label's class balance** -
+this part of the report is what happens when that check is actually run
+on every result, not skipped because a number looked good.
 
 ### Where this leaves the project
 
-**188 real training runs**, all on genuine CMRO2/BOLD_percchange-derived
+**204 real training runs**, all on genuine CMRO2/BOLD_percchange-derived
 labels, span: 5 architectures (a plain CNN, a residual CNN, a conv+
 transformer hybrid, a real encoder-decoder U-Net, and a 46M-parameter
 backbone pretrained on external 3D-medical-image data), 5 structural/
 physiological input types (T1 alone, T1 + raw/condition BOLD, T1 +
 baseline CBF/OEF, T1 + dynamic task-period dCBF/dOEF), 4 non-structural
 feature sets (covariates, a fixed geometric grid, a data-driven k-means
-parcellation, and a real anatomical atlas), voxel- *and* region-level
-units of classification, a binary *and* a 3-class framing, 4
-label-reliability/BOLD-sign filter tiers, 3 patch sizes, both
-classification and regression outcome types, augmented vs. unaugmented /
-short vs. longer training, 5-to-39 real subjects (39/40 of the dataset's
-usable cohort), 2 independent task contrasts, and a leakage-safe split
-every time. Every configuration - once checked against the correct
-baseline, not just 0.5 - lands at or below what a trivial majority-class
-guess would already get, except: regression, which lands *below* zero R2
-(worse even than predicting the mean); and the deliberate oracle positive
-control (fed the real label-defining values directly), which jumps to
-0.73-0.96, still the only configuration in the whole project that clearly
-clears its own baseline.
+parcellation, and a real anatomical atlas), voxel-, region-, *and*
+population-level units of classification, binary *and* 3-class framings,
+a magnitude proxy *and* a genuine first-level GLM Z-statistic for label
+reliability, 3 patch sizes, both classification and regression outcome
+types, augmented vs. unaugmented / short vs. longer training, 5-to-39
+real subjects (39/40 of the dataset's usable cohort), 2 independent task
+contrasts, and a leakage-safe split every time. Every configuration -
+once checked against the correct baseline, not just 0.5 - lands at or
+below what a trivial majority-class guess would already get, except:
+regression, which lands *below* zero R2 (worse even than predicting the
+mean); and the deliberate oracle positive control (fed the real
+label-defining values directly), which jumps to 0.73-0.96, still the
+only configuration in the whole project that clearly clears its own
+baseline.
 
 That combination - a ceiling that holds not just across many real
-features, architectures, filtering strategies, units of analysis, and
-cohort sizes, but *survives being checked against the one confound
-(class imbalance) that could have quietly explained an apparent success*
-- is as thorough a null result as this kind of study can produce without
-new data. Every lever this dataset and this session's tooling can reach
-has now actually been tried, including the ones this report at various
-points called blocked, untried, or (briefly, incorrectly) promising.
+features, architectures, filtering strategies, and units/scales of
+analysis, but *survives being checked against the one confound (class
+imbalance) that could have quietly explained an apparent success, and
+survives switching from a proxy reliability measure to the source
+pipeline's own real statistical evidence* - is as thorough a null result
+as this kind of study can produce without new data. Every lever this
+dataset and this session's tooling can reach has now actually been
+tried, including every item this report at various points called
+blocked, untried, or (briefly, incorrectly) promising - three of those
+were revisited a second time on direct request, and two of the three
+turned out reachable after all (the real z-statistic, group-level
+analysis); only FreeSurfer surface-based processing held up as genuinely
+blocked, and this time with concrete, checked evidence rather than an
+assumption.
 
 **The literature context remains the most important addition, but this
-project's own attempt to lean on it came back empty.** Buchel et al.'s
-(2026) independent, peer-reviewed finding that 77.2% of this dataset's
-voxels can't be robustly classified once CMRO2 estimate uncertainty is
-accounted for is real and citable on its own terms - it does not depend
-on anything in this project. But none of the four ways this project
-tried to operationalize it (magnitude filtering, ROI-averaging, the
-double filter, 3-class) produced any structural signal once checked
-properly; they only produced numbers that *looked* like signal until the
-class-imbalance confound each one introduced was accounted for. So this
-project cannot claim to have confirmed the label-noise explanation
-predicts a recoverable structural signal underneath it - only that
-Buchel et al.'s finding is independently well-supported, and that this
-project's own data does not yet show a way to exploit it.
+project's own attempts to lean on it came back empty six times over, not
+once.** Buchel et al.'s (2026) independent, peer-reviewed finding that
+77.2% of this dataset's voxels can't be robustly classified once CMRO2
+estimate uncertainty is accounted for is real and citable on its own
+terms - it does not depend on anything in this project, and this
+project's own group-level result (59-67% of cortical regions lean
+concordant across the population) is a genuine, if modest, corroborating
+descriptive finding in the same spirit. But none of the six ways this
+project tried to operationalize it into a *predictor* (magnitude
+filtering, ROI-averaging, the double filter, 3-class, the real z-stat
+filter, group-level classification) produced structural signal once
+checked properly - not even once switching from a proxy reliability
+measure to genuine first-level statistical evidence, and not even at the
+population scale where individual-voxel noise should average out the
+most. So this project cannot claim to have confirmed that a recoverable
+structural signal sits underneath the label noise Buchel et al. describe
+- only that their finding is independently well-supported, and that
+every way this project could find to exploit it did not surface one.
 
-What's genuinely left needs resources outside this session, not another
-run here: a *surface-based* (not volumetric) use of the atlas, which
-needs FreeSurfer; a true per-voxel statistical-uncertainty estimate,
-which needs the original repeated-measures/trial-level data behind the
-point-estimate maps used throughout this project, to replicate Buchel et
-al.'s exact test rather than approximate it; or a genuinely different
-outcome variable/scale of analysis, designed with a majority-baseline
-check built in from the start rather than added after a promising-looking
-number - not another architecture, more data, or another round of
-hyperparameter tuning on the same input.
+What remains genuinely out of reach is now down to one item, checked
+with concrete evidence rather than assumed: *surface-based* (not
+volumetric) atlas processing, which needs FreeSurfer - unavailable as a
+Python package and, independently, incompatible with this dataset's
+99mm-deep T1 coverage regardless of software access. Beyond that,
+nothing left is a matter of trying harder with this data and this
+session's tools - it would need new data (a dataset with denser
+repeated measures for genuine per-voxel uncertainty, or whole-brain T1
+coverage for surface reconstruction) or accepting the null result now on
+record as the answer this dataset gives.
 
 Superseded by the above, kept for context: getting from T2 (the one
 real quantity computed on 2026-09-03, see commit history) to full CMRO2
