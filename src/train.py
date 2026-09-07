@@ -50,6 +50,25 @@ def extract_and_normalize_patches(t1_volume, coords, patch_size, brain_mask):
     return patches[:, None, :, :, :].astype(np.float32)  # add channel dim
 
 
+def extract_and_normalize_multichannel_patches(volumes, coords, patch_size, brain_mask):
+    """
+    Same as extract_and_normalize_patches but for several co-registered
+    volumes at once (e.g. T1 + baseline CBF + baseline OEF), each
+    normalized independently by its own whole-brain stats before being
+    stacked as channels - the physical units and scales of T1 intensity,
+    CBF (ml/100g/min) and OEF (fraction) are wildly different, so a shared
+    normalization constant would let one channel dominate by scale alone.
+    volumes: list of (X,Y,Z) arrays, same shape, already co-registered.
+    Returns (N, C, p, p, p) float32.
+    """
+    channels = []
+    for vol in volumes:
+        patches = extract_patches(vol, coords, patch_size)
+        brain_vals = vol[brain_mask.astype(bool)]
+        channels.append(_normalize_patch_intensity(patches, brain_vals.mean(), brain_vals.std()))
+    return np.stack(channels, axis=1).astype(np.float32)  # (N, C, p, p, p)
+
+
 def augment_patch_batch(xb, rng_state=None):
     """
     Random flip along each spatial axis (dims 2,3,4 of (N,1,p,p,p)),
