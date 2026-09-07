@@ -100,10 +100,25 @@ def process_subject(sub):
             print(f"  [skip contrast] {sub} {contrast}: no usable z-stat map")
             continue
 
-        coords = labeled_voxel_coords(label, mask)
+        # The z-stat file only has real (nonzero) values within its own
+        # processing mask - only ~9% of this project's usual concordance-
+        # valid voxels overlap it (checked directly, not assumed). Ranking
+        # by |z| only makes sense *within* that covered subset - computing
+        # a percentile over a population that's ~91% exact zero would just
+        # give a threshold of 0 and filter nothing, which is what an
+        # earlier version of this script silently did.
+        z_covered = zstat != 0
+        label_mask_2d = np.zeros_like(mask, dtype=bool)
+        coords_all = labeled_voxel_coords(label, mask)
+        label_mask_2d[coords_all[:, 0], coords_all[:, 1], coords_all[:, 2]] = True
+        combined = label_mask_2d & z_covered
+        coords = np.argwhere(combined)
+        if len(coords) < 100:
+            print(f"  [skip contrast] {sub} {contrast}: too few z-covered labeled voxels ({len(coords)})")
+            continue
         raw_labels = label[coords[:, 0], coords[:, 1], coords[:, 2]]
         labels = (raw_labels > 0).astype(np.float32)
-        z_vals = zstat[coords[:, 0], coords[:, 1], coords[:, 2]]
+        z_vals = np.abs(zstat[coords[:, 0], coords[:, 1], coords[:, 2]])
 
         side_a, side_b = split_by_axis(coords, 0, midpoint, margin)
 
@@ -206,7 +221,7 @@ def main():
                     )
 
     with open(os.path.join(OUT_DIR, "all_results.json"), "w") as f:
-        json.dump({f"{c}|{f}|{t}": r for (c, f, t), r in all_results.items()}, f, indent=1)
+        json.dump({f"{c}|{f}|{t}": r for (c, f, t), r in all_results.items()}, f, indent=1, default=float)
 
     fig, ax = plt.subplots(figsize=(10, 5))
     keys = sorted(set((c, f) for (c, f, t) in all_results.keys()))
