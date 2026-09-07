@@ -567,29 +567,35 @@ contrast/fold combinations):**
 | Top 50% by \|CMRO2_percchange\| | 0.524 | 0.515-0.532 |
 | Top 25% by \|CMRO2_percchange\| | 0.513 | 0.504-0.523 |
 
-Filtering to the top 50% raised accuracy in **all 4 of 4** contrast/fold
-combinations relative to the unfiltered set - a small but consistent
-bump, in the direction the Buchel et al. explanation predicts. It is
-not, however, a clean monotonic trend: tightening further to the top 25%
-*dropped back down* in 2 of 4 combinations rather than improving further,
-and training/test set sizes there are roughly a quarter of the unfiltered
-size (~3,500-4,900 voxels vs. ~15,000-18,500), wide enough on their own
-to make single-run accuracy noisy at this scale.
+Filtering to the top 50% raised raw accuracy in all 4 of 4 contrast/fold
+combinations relative to the unfiltered set. **That initially looked
+like modest support for the reliability explanation - it is not.**
 
-**Honest reading:** modest, partial support for the reliability
-explanation - a real, consistently-directioned effect of filtering by
-estimate magnitude, but far too small (0.507 to 0.524, both still deep
-inside this project's 0.48-0.55 chance band) and too non-monotonic to
-claim it resolves the null result on its own. It's compatible with a
-mixture explanation: some real fraction of the "no signal" result is
-label noise exactly as Buchel et al. describe, but not all of it - the
-best subset here (top 50%) still falls far short of the supervisor's
-0.65-0.70 target, so a genuine structural/physiological ceiling likely
-still exists underneath the label noise, not just noise alone. This is
-the most direct, literature-motivated test this project could run with
-its own data and pipeline, and it neither confirms nor cleanly refutes
-the explanation - a fair, disclosed result rather than a forced
-conclusion either way.
+**Correction, caught by a check that should have been run before that
+conclusion was drawn:** filtering by \|CMRO2_percchange\| magnitude does
+not just remove noisy voxels - it also shifts the remaining class
+balance, since concordant and discordant voxels are not identically
+distributed by magnitude. Recomputing each tier's own trivial
+"always-predict-the-majority-class" baseline on the exact same test
+sets:
+
+| Tier | Model accuracy (range) | Majority-class baseline (range) | Beats baseline? |
+|---|---|---|---|
+| All | 0.490-0.522 | 0.511-0.533 | **No, in 4/4** |
+| Top 50% | 0.515-0.532 | 0.526-0.553 | **No, in 4/4** |
+| Top 25% | 0.504-0.523 | 0.528-0.575 | **No, in 4/4** |
+
+The model does not beat the trivial baseline in a single one of these 12
+contrast/fold/tier combinations - not just at the unfiltered level (consistent
+with everything else in this project), but at every filtered tier too. The
+apparent "improvement" from filtering was the filter shifting the class
+balance, not the model learning anything from the more reliable subset.
+**Corrected reading: no support for the reliability explanation from this
+particular test** - a real, disclosed correction to an earlier draft of
+this section, not a re-run with different numbers. See "Where this leaves
+the project" below for what the properly-checked reliability/ROI/double-
+filter/3-class results (this section and the three that follow) add up
+to together.
 
 ## Real Glasser/HCP-MMP1.0 atlas: the last thing said to be blocked
 
@@ -673,17 +679,25 @@ handles this without modification, since a model's forward signature was
 always generic.
 
 **Result: 0.522-0.567** (calc: 37 subjects, ~5,700-6,050 ROIs/side; mem:
-30 subjects, ~4,580-4,920 ROIs/side) - the highest range of any
-structural-only experiment in this project, and the first to poke
-slightly above the 0.48-0.55 band nearly everything else has landed in
-(mem, A-train-B-test: 0.567). Still nowhere near the 0.65-0.70 target,
-and with only 2 folds per contrast this should not be over-read as a
-breakthrough - but it moves in exactly the direction the Buchel et al.
-explanation predicts, and by a similar or slightly larger margin than
-the more conservative reliability-filtering test above. Of everything
-tried in this project, region-level averaging is the single result
-closest to "worth a closer, better-powered look" rather than a clean
-null.
+30 subjects, ~4,580-4,920 ROIs/side) - the highest raw-accuracy range of
+any structural-only experiment in this project. **This is not a positive
+finding, and reporting it as one (an earlier draft of this section did)
+was a mistake, caught and corrected here.**
+
+Checking each fold's own trivial majority-class baseline: **0.5355,
+0.5216, 0.5671, 0.5268** - matching the model's own accuracy to four
+decimal places, in every single one of the 4 combinations. The
+`RegionMLP` did not learn anything from the region-level structural
+profile at all; it simply learned to always predict whichever class was
+more common in each fold's training data, and region-level concordance
+happens to be noticeably imbalanced per hemisphere side (unlike the
+voxel-level label, which stayed close to 50/50 by construction
+throughout the rest of this project). The "highest range in the project"
+framing was true of the raw number and false of what it means - this
+result is exactly as null as everything else, just dressed up by class
+imbalance. Left in the report, corrected rather than deleted, because
+the catch itself - and having to publish the correction - is a fair
+thing for a supervisor to see.
 
 ### Reliability x positive-BOLD double filter
 
@@ -698,7 +712,29 @@ above): `positive_bold_top50pct` keeps only voxels with BOLD_percchange
 architecture (SimplePatchCNN, patch=9, T1-only) and leakage-safe
 protocol as the single-filter test.
 
-<!-- DOUBLE_FILTER_RESULT -->
+**Result, majority-baseline-checked from the start this time:**
+
+| Tier | Model accuracy (range) | Majority-class baseline (range) | Beats baseline? |
+|---|---|---|---|
+| All | 0.504-0.520 | 0.511-0.533 | No, in 4/4 |
+| Top 50% | 0.513-0.550 | 0.524-0.555 | No, in 4/4 |
+| Positive BOLD only | 0.525-0.569 | 0.557-0.576 | No, in 4/4 |
+| Positive BOLD + top 50% (the double filter) | 0.536-0.627 | 0.609-0.628 | **No, in 4/4** |
+
+The double filter produces the single highest raw accuracy anywhere in
+this entire project - **0.624 and 0.627** in two of the four
+combinations, clearing 0.60 for the first time. Checked immediately
+against the majority-class baseline (a lesson applied from the two
+corrections directly above, not learned the hard way a third time): in
+those same two combinations the baseline is 0.628 and 0.622 - the model
+is at or fractionally below chance-adjusted-for-imbalance in every
+tier, every combination, all the way up to the most aggressively
+filtered one. Buchel et al.'s own finding (positive BOLD skews strongly
+concordant) is confirmed here as a real property of this dataset - the
+majority-class baseline climbing from ~0.52 (all voxels) to ~0.62
+(double filter) *is* that skew, directly visible - but it is a fact
+about the label's marginal distribution, not evidence the model reads
+any structural signal.
 
 ### 3-class framing: concordant / discordant / unreliable
 
@@ -713,65 +749,100 @@ Also reports binary sign-accuracy restricted to voxels that were
 *actually* reliable in the test set, for comparability with the rest of
 this project's binary-accuracy numbers.
 
-<!-- THREE_CLASS_RESULT -->
+**Result:** 3-class accuracy 0.467-0.509. Against the naive uniform
+chance level (1/3) this looks like a real margin - but by now this
+report checks the right baseline first: the "unreliable" class is
+defined as exactly the bottom half of training voxels by construction,
+and (since real discordant/concordant voxels split roughly evenly
+between the top half) it makes up **49.2-50.7%** of each test set - so
+"always predict unreliable" is the correct baseline here, not 1/3, and
+it is **0.492-0.507**, essentially identical to the model's own 3-class
+accuracy (0.467-0.509, below the baseline in 3 of 4 combinations).
+
+The secondary metric confirms this directly rather than leaving it
+inferred: binary sign-accuracy restricted to voxels the model didn't
+predict as "unreliable" and that were genuinely reliable in the test set
+was **0.010-0.119** - far below even 0.5, meaning that on the rare
+occasions the model did venture a concordant/discordant call instead of
+defaulting to "unreliable", it was wrong far more often than a coin
+flip. The model's only real behavior here is a bias toward predicting
+the majority class ("unreliable"); it shows no evidence of encoding the
+actual concordant-vs-discordant distinction at all.
+
+### A methodological note that applies to all four sections above
+
+Every one of the four Buchel-motivated experiments above (reliability
+filtering, ROI-averaging, the double filter, 3-class) was checked
+against its own tier/fold's trivial majority-class baseline before its
+result was accepted - not just against 0.5 or 1/3. Two of them
+(reliability filtering, the double filter) were *first written up* with
+a more favorable reading and corrected in place once that check was run;
+the correction is left visible in each section rather than quietly
+edited away, including the single highest raw accuracy in this whole
+project (0.627, double filter) turning out to be indistinguishable from
+"always guess concordant." This is worth stating plainly for whoever
+reads this next: **raw accuracy is not evidence on its own whenever a
+filter or reframing can shift the label's class balance** - the four
+sections above are what happens when that check is actually run, not
+skipped because a number looked good.
 
 ### Where this leaves the project
 
-**164 real training runs**, all on genuine CMRO2/BOLD_percchange-derived
+**188 real training runs**, all on genuine CMRO2/BOLD_percchange-derived
 labels, span: 5 architectures (a plain CNN, a residual CNN, a conv+
 transformer hybrid, a real encoder-decoder U-Net, and a 46M-parameter
 backbone pretrained on external 3D-medical-image data), 5 structural/
 physiological input types (T1 alone, T1 + raw/condition BOLD, T1 +
 baseline CBF/OEF, T1 + dynamic task-period dCBF/dOEF), 4 non-structural
 feature sets (covariates, a fixed geometric grid, a data-driven k-means
-parcellation, and a real anatomical atlas), 3 label-reliability tiers
-(all voxels, top 50%, top 25% by \|CMRO2_percchange\|), 3 patch sizes,
-both classification and regression framings, augmented vs. unaugmented /
+parcellation, and a real anatomical atlas), voxel- *and* region-level
+units of classification, a binary *and* a 3-class framing, 4
+label-reliability/BOLD-sign filter tiers, 3 patch sizes, both
+classification and regression outcome types, augmented vs. unaugmented /
 short vs. longer training, 5-to-39 real subjects (39/40 of the dataset's
 usable cohort), 2 independent task contrasts, and a leakage-safe split
-every time. Nearly every configuration lands at 0.48-0.55, except:
-regression, which lands *below* zero R2 (worse than predicting the
-mean); the deliberate oracle positive control (fed the real
-label-defining values directly), which jumps to 0.73-0.96; and the
-reliability-filtered top-50% subset, which nudges to a mean 0.524 -
-still inside the same band, not a break from it.
+every time. Every configuration - once checked against the correct
+baseline, not just 0.5 - lands at or below what a trivial majority-class
+guess would already get, except: regression, which lands *below* zero R2
+(worse even than predicting the mean); and the deliberate oracle positive
+control (fed the real label-defining values directly), which jumps to
+0.73-0.96, still the only configuration in the whole project that clearly
+clears its own baseline.
 
-That combination - a hard ceiling that many different real features
-(including physiological baseline maps physically upstream of the label,
-and real group-level anatomical region identity, not just local
-intensity), architectures (including one bringing in external pretraining
-data), and cohort sizes all hit, paired with a positive control that
-clears it easily when given the answer - is about as thorough a null
-result as this kind of study can produce without new data. Every lever
-this dataset and this session's tooling can reach - cohort completion,
-pretrained backbone, baseline and dynamic CBF/OEF, and the real atlas
-itself, all previously reported as blocked or untried - has now actually
-been tried.
+That combination - a ceiling that holds not just across many real
+features, architectures, filtering strategies, units of analysis, and
+cohort sizes, but *survives being checked against the one confound
+(class imbalance) that could have quietly explained an apparent success*
+- is as thorough a null result as this kind of study can produce without
+new data. Every lever this dataset and this session's tooling can reach
+has now actually been tried, including the ones this report at various
+points called blocked, untried, or (briefly, incorrectly) promising.
 
-**What most changes the picture isn't another lever, though - it's the
-literature context found along the way.** An independent, peer-reviewed
-reanalysis of this exact dataset's own methodology (Buchel et al. 2026,
-challenging Epp et al. 2025 - the source of this project's label; see
-above) found that 77.2% of voxels can't be robustly classified as
-concordant/discordant once the statistical uncertainty of the CMRO2
-estimates is accounted for. This project's own reliability-filtered test
-of that explanation found modest, partial, non-monotonic support for
-it - real, but not enough on its own to explain the full null result.
-The most defensible current reading: the true ceiling for this task is
-some combination of real label noise (as Buchel et al. document
-independently) and a genuine absence of local structural/physiological
-signal at the scales tested here - not a failure of search effort. What's
-left needs either: a surface-based rather than volumetric use of the
-atlas (would need FreeSurfer, not available here), a proper
-statistical-uncertainty estimate per voxel (would need access to the
-original repeated-measures/trial-level data, not just the point-estimate
-maps used here, to replicate Buchel et al.'s test exactly rather than
-approximate it), or a different outcome variable/scale of analysis
-entirely (group-level statistics across subjects rather than per-voxel
-prediction within one, for instance, which would also naturally average
-away much of the per-voxel noise Buchel et al. describe) - not another
-architecture, more data, or another round of hyperparameter tuning on
-the same input.
+**The literature context remains the most important addition, but this
+project's own attempt to lean on it came back empty.** Buchel et al.'s
+(2026) independent, peer-reviewed finding that 77.2% of this dataset's
+voxels can't be robustly classified once CMRO2 estimate uncertainty is
+accounted for is real and citable on its own terms - it does not depend
+on anything in this project. But none of the four ways this project
+tried to operationalize it (magnitude filtering, ROI-averaging, the
+double filter, 3-class) produced any structural signal once checked
+properly; they only produced numbers that *looked* like signal until the
+class-imbalance confound each one introduced was accounted for. So this
+project cannot claim to have confirmed the label-noise explanation
+predicts a recoverable structural signal underneath it - only that
+Buchel et al.'s finding is independently well-supported, and that this
+project's own data does not yet show a way to exploit it.
+
+What's genuinely left needs resources outside this session, not another
+run here: a *surface-based* (not volumetric) use of the atlas, which
+needs FreeSurfer; a true per-voxel statistical-uncertainty estimate,
+which needs the original repeated-measures/trial-level data behind the
+point-estimate maps used throughout this project, to replicate Buchel et
+al.'s exact test rather than approximate it; or a genuinely different
+outcome variable/scale of analysis, designed with a majority-baseline
+check built in from the start rather than added after a promising-looking
+number - not another architecture, more data, or another round of
+hyperparameter tuning on the same input.
 
 Superseded by the above, kept for context: getting from T2 (the one
 real quantity computed on 2026-09-03, see commit history) to full CMRO2
