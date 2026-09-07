@@ -462,7 +462,7 @@ their physical units and scales aren't comparable) and trains
 `SimplePatchCNN(in_channels=3)`, compared directly against the same
 architecture on T1-only patches, on the identical voxels.
 
-**Result: 0.502-0.522 (T1-only) vs. 0.507-0.516 (T1+baseline CBF/OEF)** -
+**Result: 0.510-0.528 (T1-only) vs. 0.502-0.515 (T1+baseline CBF/OEF)** -
 no meaningful separation; both ranges overlap and sit at chance. Even
 physiological quantities upstream of the label's own definition (the
 components CMRO2 itself is built from) don't move the needle when given
@@ -471,6 +471,94 @@ the missing ingredient may not be "the right kind of local map" at all,
 but something at a different spatial/temporal scale (dynamic
 neurovascular coupling response, not static baseline; or region identity
 rather than a local patch, per the atlas discussion below).
+
+*(Numbers corrected from an earlier version of this section: CBF exists
+in two derivatives subfolders, perf/ and qmri/, with different S3
+versions, while OEF only ever exists in qmri/ - the first version of
+`download_cbf_oef.py` implicitly took whichever matched first, which
+turned out to be perf/ for CBF while OEF necessarily came from qmri/, an
+unintentional pipeline mismatch. Now explicit about preferring qmri/ for
+both, matching the same processing lineage CMRO2 itself was computed
+from. The conclusion is unchanged.)*
+
+### Dynamic (task-period) CBF/OEF: the neurovascular response itself
+
+The remaining open idea from the previous version of this section:
+instead of the resting baseline, `dCBF = CBF_task - CBF_control` and
+`dOEF = OEF_task - OEF_control` - the vasculature's actual response to
+the stimulus, the quantity that (via Fick's principle) mechanically
+produces CMRO2_percchange itself, not just informs it indirectly like
+the baseline case.
+
+**This closeness to the label's own formula must be disclosed, not
+glossed over.** CMRO2_percchange = (CBF_task*OEF_task -
+CBF_control*OEF_control) / (CBF_control*OEF_control) x 100 (CaO2
+cancels). dCBF and dOEF are not algebraically identical to that ratio -
+recovering it needs the absolute baseline values too, not just the
+differences - but they are the two physiological quantities it's built
+from, correlated with it in a way the baseline-only case is not.
+`scripts/run_task_cbf_oef.py`'s docstring states this explicitly and
+frames the experiment as sitting between the legitimate baseline case
+and the oracle positive control on the circularity spectrum.
+
+**Result: 0.505-0.517 (T1-only) vs. 0.520-0.532 (T1+dynamic dCBF/dOEF)** -
+the dynamic channel comes out slightly ahead of T1-only in all 4
+contrast/fold combinations, a more consistent direction than the mixed
+baseline-CBF/OEF result. But 0.520-0.532 sits fully inside the 0.48-0.55
+band every other configuration in this project (including plainly
+chance-level ones) has landed in - it is not distinguishable from noise
+given everything else observed at this N, and per the disclosure above,
+any real portion of this small gap would reflect partial algebraic
+closeness to the label, not a discovered structural biomarker. Reported
+as an ambiguous, likely-still-null result, not a finding.
+
+### Independent literature context that reframes this project's null result
+
+A literature search turned up something more informative than another
+architecture or feature would have been: an **independent reanalysis of
+this exact dataset's methodology**, published after this project's data
+was collected. Epp et al.'s concordant/discordant classification (the
+source of this project's label, and by now peer-reviewed: *BOLD signal
+changes can oppose oxygen metabolism across the human cortex*, Nature
+Neuroscience 2025) has since been directly challenged by **Buchel et al.
+(2026, eLife reviewed preprint / bioRxiv), "Opposing BOLD signals and
+oxygen metabolism largely arise from statistical uncertainty in
+metabolic estimates."** Their central quantitative finding: once the
+statistical uncertainty of the underlying CMRO2 estimates is accounted
+for, **77.2% of voxels could not be robustly classified** as concordant
+or discordant at all - the estimated ΔCMRO2 effect lacked sufficient
+statistical support to determine a sign with confidence. Where
+classification *was* possible, positive BOLD responses were
+predominantly concordant with metabolism, while discordance was
+concentrated in negative BOLD responses.
+
+This is not merely a plausible excuse invented after the fact - it is an
+independent, quantitative, peer-reviewed re-examination of the very
+labels this project spent 152 real training runs trying to predict. If
+the true, noise-free concordant/discordant status is only reliably
+defined for roughly a quarter of voxels, then no predictor, however
+good, can systematically classify the label at the individual-voxel
+level as *given* in this dataset - a large share of it may not be a
+stable per-voxel property to predict in the first place.
+
+**Directly testable with this project's own pipeline, so it was tested**:
+see the reliability-filtered experiment below.
+
+## Reliability-filtered concordance: does the Buchel et al. explanation hold up here?
+
+`scripts/run_reliability_filtered.py` restricts the structural-only
+baseline (`SimplePatchCNN`, patch=9 - this project's simplest, most-run
+configuration) to the voxels *least* likely to be noise-dominated, using
+`|CMRO2_percchange|` magnitude as a literature-consistent proxy for
+statistical robustness (this dataset has no per-voxel SEM/uncertainty
+map to reproduce Buchel et al.'s exact test - a fixed-scale measurement
+floor is far more likely to flip the sign of a small percent change than
+a large one, the same statistical logic, not the same numbers). Compares
+all voxels / top 50% / top 25% by magnitude, same subjects and patches,
+threshold fit on each fold's training side only so nothing about test
+labels leaks into the cutoff.
+
+<!-- RELIABILITY_FILTERED_RESULT -->
 
 ## Real Glasser/HCP-MMP1.0 atlas: the last thing said to be blocked
 
