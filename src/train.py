@@ -135,6 +135,60 @@ def train_one_fold(train_patches, train_labels, test_patches, test_labels,
     return model, history, test_pred, test_probs
 
 
+def train_one_fold_multiclass(train_x, train_labels, test_x, test_labels,
+                               n_classes, epochs=15, batch_size=32, lr=1e-3, device="cpu", seed=0,
+                               model_factory=None):
+    """Same shape as train_one_fold but for >2 integer class labels
+    (0..n_classes-1) via CrossEntropyLoss - used by the
+    concordant/discordant/unreliable 3-class framing. train_labels/
+    test_labels: int64 arrays. model_factory must return a module whose
+    forward gives (N, n_classes) logits (e.g. RegionMLP(n_classes=3) or
+    any patch model with its final layer's out_features set to
+    n_classes)."""
+    torch.manual_seed(seed)
+    model = model_factory().to(device)
+    opt = torch.optim.Adam(model.parameters(), lr=lr)
+    loss_fn = torch.nn.CrossEntropyLoss()
+
+    train_ds = TensorDataset(torch.from_numpy(train_x), torch.from_numpy(train_labels).long())
+    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+
+    x_test = torch.from_numpy(test_x).to(device)
+    y_test = torch.from_numpy(test_labels).long().to(device)
+
+    history = {"train_loss": [], "train_acc": [], "val_acc": []}
+    for epoch in range(epochs):
+        model.train()
+        losses, correct, total = [], 0, 0
+        for xb, yb in train_dl:
+            xb, yb = xb.to(device), yb.to(device)
+            opt.zero_grad()
+            logits = model(xb)
+            loss = loss_fn(logits, yb)
+            loss.backward()
+            opt.step()
+            losses.append(loss.item())
+            correct += (logits.argmax(dim=1) == yb).sum().item()
+            total += len(yb)
+
+        model.eval()
+        with torch.no_grad():
+            test_logits = model(x_test)
+            val_acc = (test_logits.argmax(dim=1) == y_test).float().mean().item()
+
+        history["train_loss"].append(float(np.mean(losses)))
+        history["train_acc"].append(correct / total)
+        history["val_acc"].append(val_acc)
+
+    model.eval()
+    with torch.no_grad():
+        test_logits = model(x_test)
+        test_probs = torch.softmax(test_logits, dim=1).cpu().numpy()
+        test_pred = test_logits.argmax(dim=1).cpu().numpy()
+
+    return model, history, test_pred, test_probs
+
+
 def run_hemisphere_experiment(
     t1_volume, label_volume, brain_mask, affine,
     patch_size=9, axis_index=0, margin_vox=None,
