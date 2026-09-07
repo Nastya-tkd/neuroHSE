@@ -325,3 +325,32 @@ class PretrainedFeatureHead(nn.Module):
 
     def forward(self, x):
         return self.net(x).squeeze(-1)
+
+
+class RegionMLP(nn.Module):
+    """Small MLP over a plain feature vector - used when the unit of
+    classification is a whole anatomical region (e.g. a real Glasser
+    parcel, ROI-averaged), not a voxel patch, so there is no spatial patch
+    for a 3D CNN to look at in the first place. Same generic (N, dim) ->
+    (N,) logits interface as PretrainedFeatureHead, named separately since
+    the input here is a handful of ROI summary statistics, not deep
+    backbone features. n_classes=1 gives binary logits (as everywhere else
+    in this project); n_classes>1 gives multi-class logits (used by the
+    3-class concordant/discordant/unreliable framing)."""
+
+    def __init__(self, in_dim=3, hidden=32, n_classes=1):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, hidden),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.2),
+            nn.Linear(hidden, hidden),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.2),
+            nn.Linear(hidden, n_classes),
+        )
+        self.n_classes = n_classes
+
+    def forward(self, x):
+        out = self.net(x)
+        return out.squeeze(-1) if self.n_classes == 1 else out
