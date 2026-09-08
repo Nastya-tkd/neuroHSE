@@ -912,14 +912,65 @@ open after the class-imbalance correction: not "one more architecture
 might still help" but a direct, one-time test of exactly that question,
 with a clean negative answer.
 
+## Baseline CBV: the vascular-morphology hypothesis, directly tested
+
+Raised by the supervisor (Alexei Ossadtchi) after the ensemble result
+above: could T1/T2 structural contrasts encode something about capillary
+density/morphology, which in turn governs a tissue's local oxygen-
+delivery relationship to nearby neurons - via sub-voxel effects the raw
+intensity doesn't show but might still statistically carry? Individual
+capillaries are two to three orders of magnitude below this dataset's
+voxel size, so they cannot be resolved directly. But the physical
+mechanism proposed is real and well-established, once stated precisely:
+not "aliasing" (which would require information-preserving fold-over of
+a periodic structure), but **partial-volume averaging** - a voxel's
+observed T1/T2/T2* relaxation is a weighted average over its blood and
+tissue compartments, and blood's relaxation properties differ enough from
+surrounding tissue that its local volume fraction measurably shifts the
+average (the same physical principle DSC/BOLD imaging itself is built
+on). So a real, if indirect and lossy, structural signature of local
+vascular density is physically plausible, even though the capillary
+network itself is invisible at this resolution.
+
+Of the maps already recovered in this project, **CBV (cerebral blood
+volume)** is the more direct macroscopic proxy for that hypothesis than
+CBF (flow) or T1 intensity alone - it had not been tested until now.
+Same non-circularity logic and leakage-safe protocol as the CBF/OEF
+experiment above: only the *control*-condition (baseline) CBV is used,
+never the task-condition value, so it sits physiologically upstream of
+the label's own definition rather than restating it.
+`scripts/run_cbv.py` extracts co-registered 2-channel patches (T1 +
+baseline CBV, each independently normalized) and trains
+`SimplePatchCNN(in_channels=2)`, compared directly against T1-only on
+the identical voxels, on the identical 39/40-subject cohort as
+everywhere else. The majority-class baseline is computed and reported
+for every fold from the start, same discipline as every experiment since
+the ROI-averaged correction.
+
+**Result: model does not beat the majority-class baseline in any of the
+4 contrast/fold combinations** - calc A→B: 0.511 vs. 0.516 baseline;
+calc B→A: 0.509 vs. 0.513; mem A→B: 0.524 vs. 0.534; mem B→A: 0.506 vs.
+0.508. T1-only sits in the same 0.498-0.519 range. Adding baseline CBV
+moves accuracy by at most ~1-2 points either way, always still below
+that fold's own trivial baseline - the same pattern as every other
+physiological or structural input this project has tried. The
+vascular-morphology hypothesis is physically sound and worth stating in
+the report as a real, testable mechanism, but this dataset's baseline
+CBV map, at this resolution and with this label, does not carry a
+detectable trace of it. This was a direct test of one specific,
+supervisor-proposed hypothesis (not a new configuration search), so it
+does not reopen the multiple-comparisons concern that closed the broader
+search after the ensemble.
+
 ### Where this leaves the project
 
-**220 real training runs**, all on genuine CMRO2/BOLD_percchange-derived
+**228 real training runs**, all on genuine CMRO2/BOLD_percchange-derived
 labels, span: 5 architectures (a plain CNN, a residual CNN, a conv+
 transformer hybrid, a real encoder-decoder U-Net, and a 46M-parameter
-backbone pretrained on external 3D-medical-image data), 5 structural/
+backbone pretrained on external 3D-medical-image data), 6 structural/
 physiological input types (T1 alone, T1 + raw/condition BOLD, T1 +
-baseline CBF/OEF, T1 + dynamic task-period dCBF/dOEF), 4 non-structural
+baseline CBF/OEF, T1 + dynamic task-period dCBF/dOEF, T1 + baseline
+CBV), 4 non-structural
 feature sets (covariates, a fixed geometric grid, a data-driven k-means
 parcellation, and a real anatomical atlas), voxel-, region-, *and*
 population-level units of classification, binary *and* 3-class framings,
@@ -990,9 +1041,12 @@ beats the ceiling either. At this point, further search over this
 dataset with this session's tools would not be thoroughness - repeating
 configurations against a result this consistent mainly raises the
 odds of a false positive by chance (the standard multiple-comparisons
-concern), not the odds of a real one. **220 runs is where this project
-stops treating "try one more thing" as the answer.** The result is the
-answer.
+concern), not the odds of a real one. The one exception made after that
+closing statement was a direct test of the supervisor's specific,
+physically-grounded vascular-morphology hypothesis (baseline CBV, above)
+- a single targeted hypothesis test, not a reopened search - and it came
+back null too. **228 runs is where this project stops treating "try one
+more thing" as the answer.** The result is the answer.
 
 Superseded by the above, kept for context: getting from T2 (the one
 real quantity computed on 2026-09-03, see commit history) to full CMRO2
