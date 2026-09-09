@@ -310,18 +310,39 @@ everything else.
 
 **Oracle / positive control - not a scientific result.** Feeds the model
 the real `BOLD_percchange` and `CMRO2_percchange` values that *define* the
-label directly, so high accuracy is expected by construction; this is a
-pipeline sanity check, not a finding about structure. Verified first on one
-subject (0.956 accuracy) to confirm the concept works, then run pooled
-across all 25: **0.734-0.741** - clearly, unambiguously separated from
-every real experiment's 0.48-0.53, confirming the training pipeline is
-capable of detecting real signal when it's actually present in the input.
-(The drop from 0.956 on one subject to ~0.74 pooled across 25 is itself
-informative and worth a follow-up if it matters: likely the small
-`PatchBOLDConditionNet` MLP branch under-converges in 15 epochs on a much
-larger, more heterogeneous pooled set - not something that changes the
-conclusion, since the gap to the near-chance real results stays enormous
-either way.)
+label directly, so accuracy near 100% is expected by construction (the
+label is exactly `sign(BOLD_percchange) x sign(CMRO2_percchange)`); this is
+a pipeline sanity check, not a finding about structure. Verified first on
+one subject (0.956 accuracy) to confirm the concept works, then run pooled
+across all 25.
+
+*(Bug found and fixed: the pooled version originally z-scored - mean-
+subtracted and scaled - the two oracle features before feeding them to the
+model. Since the label is defined purely by their signs, and each column's
+per-subject mean is essentially never exactly zero (2.8-27.4 across sampled
+subjects, since CMRO2%change is not symmetric per subject), centering shifts
+each column's effective zero-crossing away from the true zero and silently
+flips the label for every voxel whose raw value fell between the old and
+new zero point - worst for small-magnitude, near-zero voxels, which this
+dataset has many of. Verified directly on 5 real subjects: 18-44% of labels
+were flipped by this normalization alone, nothing to do with the model's
+ability to learn. Fixed by switching to scale-only normalization (divide by
+std, no mean subtraction), which preserves sign exactly - verified: 0 flips
+on the same 5 subjects. This only touches the oracle sanity check; none of
+the real structural/physiological experiments used this feature.)*
+
+**Corrected result: 0.955-0.975** pooled across all 25 subjects - now
+properly separated from the near-chance real experiments' 0.48-0.53 by a
+huge margin, and consistent with the single-subject check (0.956) rather
+than sitting well below it. This is the reading that should be trusted:
+the training pipeline can recover the label almost perfectly when it is
+handed the values that define it, which is exactly what a sanity check
+should show - confirming Experiments 1-2's (and everything after them's)
+chance-level numbers reflect a genuine absence of structural signal, not a
+broken or underpowered training loop. (The earlier 0.734-0.741 figure was
+itself an artifact of the same normalization bug, not a real ~25%
+optimization gap - superseded, kept in git history for transparency rather
+than silently removed.)
 
 ## Fourth architecture (real U-Net) + longer, augmented training
 
@@ -983,9 +1004,11 @@ once checked against the correct baseline, not just 0.5 - lands at or
 below what a trivial majority-class guess would already get, except:
 regression, which lands *below* zero R2 (worse even than predicting the
 mean); and the deliberate oracle positive control (fed the real
-label-defining values directly), which jumps to 0.73-0.96, still the
-only configuration in the whole project that clearly clears its own
-baseline.
+label-defining values directly), which - after fixing a normalization
+bug that was silently flipping 18-44% of its labels, see above - jumps
+to 0.955-0.975, still the only configuration in the whole project that
+clearly clears its own baseline, and now by a much cleaner margin than
+the pre-fix 0.73-0.74 figure suggested.
 
 That combination - a ceiling that holds not just across many real
 features, architectures, filtering strategies, and units/scales of
