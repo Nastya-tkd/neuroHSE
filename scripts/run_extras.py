@@ -207,7 +207,15 @@ def process_subject(sub, participants):
         pct_vals = pct[used_coords[:, 0], used_coords[:, 1], used_coords[:, 2]]
         bold_vals = bold[used_coords[:, 0], used_coords[:, 1], used_coords[:, 2]]
         oracle_feat = np.stack([bold_vals, pct_vals], axis=1).astype(np.float32)
-        oracle_feat = (oracle_feat - oracle_feat.mean(axis=0)) / (oracle_feat.std(axis=0) + 1e-6)
+        # Scale-only (no mean subtraction): the label is exactly
+        # sign(bold_vals) * sign(pct_vals), so centering here would shift
+        # each column's zero-crossing away from true zero and silently
+        # flip the label for every voxel whose raw value sits between the
+        # old and new zero points - most damaging for near-zero voxels,
+        # which this dataset has many of. Dividing by std alone preserves
+        # sign exactly while still keeping the two columns on comparable
+        # scales for the network.
+        oracle_feat = oracle_feat / (oracle_feat.std(axis=0) + 1e-6)
 
         out[contrast] = {
             "patches": patches, "labels": used_labels, "side": side_tags,
