@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+*.log
+train_log.txt
+streamlit_log.txt
+
+# Trained checkpoint is committed separately once training finishes
+# (it's actively being overwritten by a background training run).
+model/*.pt
+model/training_history.json
+model/model_meta.json
