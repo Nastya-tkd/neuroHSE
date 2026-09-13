@@ -1,0 +1,21 @@
+{
+  "input_size": 192,
+  "in_channels": 1,
+  "num_classes": 4,
+  "class_names": [
+    "background",
+    "tumor",
+    "edema",
+    "necrosis"
+  ],
+  "base_channels": 24,
+  "val_animals": [
+    "8",
+    "13",
+    "17"
+  ],
+  "best_mean_fg_dice": 0.4131708756695043,
+  "train_pairs": 191,
+  "val_pairs": 61,
+  "epochs": 100
+}
