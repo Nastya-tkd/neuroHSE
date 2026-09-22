@@ -1,29 +1,34 @@
 """
-Real anatomical parcellation (Glasser/HCP-MMP1.0), the one thing every
-earlier report in this project said was genuinely blocked - both
-externally (Zenodo/HuggingFace/OSF/NITRC) and, unlike CBF/OEF or the
-MedicalNet weights, confirmed absent from this dataset's own derivatives
-too. It turned out obtainable a different way: the atlas itself (not
-weights, not the dataset) is a static, group-level label volume with no
-protected/licensed distribution requirement, and a community mirror
-exists as a plain file in a GitHub repo
-(github.com/mbedini/The-HCP-MMP1.0-atlas-in-FSL) - a host already
-reachable in this session. Getting it into each subject's own space
-needed real image registration, done here with ANTsPy (PyPI) against a
-nilearn-bundled MNI152 template (see src/glasser_atlas.py for the full
-methodology and its honesty caveats - this is a coarse volumetric
-approximation of Glasser, explicitly flagged as such by the atlas's own
-maintainer, not the surface-based version the atlas was built/validated
-for).
+Настоящая анатомическая парцелляция (Glasser/HCP-MMP1.0) - единственное,
+что во всех более ранних отчётах этого проекта называлось по-настоящему
+недоступным - и внешне (Zenodo/HuggingFace/OSF/NITRC), и, в отличие от
+CBF/OEF или весов MedicalNet, подтверждённо отсутствующим также в
+собственных производных данных этого датасета. Оказалось, что её можно
+получить другим способом: сам атлас (не веса, не датасет) представляет
+собой статичный групповой объём меток без требований к защищённому/
+лицензированному распространению, и существует его копия от сообщества
+в виде обычного файла в репозитории GitHub
+(github.com/mbedini/The-HCP-MMP1.0-atlas-in-FSL) - хост, уже доступный в
+этой сессии. Чтобы перенести его в пространство каждого пациента,
+потребовалась настоящая регистрация изображений, выполненная здесь с
+помощью ANTsPy (PyPI) относительно шаблона MNI152, входящего в состав
+nilearn (полную методологию и оговорки о её честности см. в
+src/glasser_atlas.py - это грубое объёмное приближение Glasser, явно
+отмеченное как таковое самим сопровождающим атласа, а не
+поверхностно-ориентированная версия, для которой атлас изначально
+создавался и валидировался).
 
-Otherwise identical in spirit to run_parcellation.py's k-means version:
-each labeled voxel gets a 3-feature descriptor (mean T1, T1 std,
-log-size) of the *real* Glasser parcel it falls in (not a data-driven
-cluster), computed separately per hemisphere-split side so no feature
-leaks across the train/test boundary, fed through PatchBOLDConditionNet
-the same way. This directly tests whether real, group-consistent
-anatomical region identity (as opposed to a data-driven local cluster)
-carries the signal the local T1 patch alone did not.
+В остальном по духу идентично версии с k-means из run_parcellation.py:
+каждый размеченный воксель получает дескриптор из 3 признаков (среднее
+T1, стандартное отклонение T1, логарифм размера) *настоящего* парцела
+Glasser, в который он попадает (а не кластера, полученного из данных),
+вычисленный отдельно для каждой стороны разбиения по полушариям, чтобы
+ни один признак не просачивался через границу train/test, и подаваемый
+в PatchBOLDConditionNet тем же образом. Это напрямую проверяет, несёт ли
+настоящая, согласованная на уровне группы анатомическая идентичность
+области (в противоположность локальному кластеру, полученному из
+данных) сигнал, который не удалось обнаружить одному лишь локальному
+патчу T1.
 """
 
 import os
@@ -66,12 +71,13 @@ def build_label(cmro2, bold_pct, mask, contrast):
 
 
 def region_stats_for_side(t1, mask, atlas, side_mask_x):
-    """{parcel_id: (mean_t1, std_t1, log_size)} using only this side's own
-    voxels - mirrors run_parcellation.py's per-side stats, so a real
-    Glasser parcel (which in practice never straddles the midline, since
-    IDs 1-180/1000-1180 are already hemisphere-specific) still can't leak
-    features across the train/test hemisphere boundary even if the
-    volumetric registration bleeds slightly across it."""
+    """{parcel_id: (mean_t1, std_t1, log_size)} с использованием только
+    вокселей данной стороны - повторяет постороннюю статистику из
+    run_parcellation.py, так что настоящий парцел Glasser (который на
+    практике никогда не пересекает срединную линию, поскольку ID
+    1-180/1000-1180 уже привязаны к полушарию) всё равно не может
+    просочиться через границу полушарий train/test, даже если объёмная
+    регистрация слегка выходит за неё."""
     xs = np.where(side_mask_x)[0]
     m = mask.astype(bool)
     coords = np.argwhere(m)
@@ -92,10 +98,10 @@ def process_subject(sub):
     try:
         result, notes = load_subject_robust(sub)
     except Exception as e:
-        print(f"  [error] {sub}: {e}")
+        print(f"  [ошибка] {sub}: {e}")
         return None
     if result is None:
-        print(f"  [skip] {sub}: {notes}")
+        print(f"  [пропуск] {sub}: {notes}")
         return None
     t1, affine, mask, cmro2, bold_pct = result
 
@@ -107,10 +113,10 @@ def process_subject(sub):
     try:
         atlas = get_subject_glasser_atlas(sub, t1_cache_path)
     except Exception as e:
-        print(f"  [skip] {sub}: atlas registration failed ({e})")
+        print(f"  [пропуск] {sub}: регистрация атласа не удалась ({e})")
         return None
     if atlas.shape != t1.shape:
-        print(f"  [skip] {sub}: atlas shape {atlas.shape} != t1 shape {t1.shape}")
+        print(f"  [пропуск] {sub}: форма атласа {atlas.shape} != форма t1 {t1.shape}")
         return None
 
     midpoint = hemisphere_midpoint(t1.shape, axis_index=0)
@@ -170,7 +176,7 @@ def main():
         try:
             result = process_subject(sub)
         except Exception:
-            print(f"  [error] {sub}:\n{traceback.format_exc()}")
+            print(f"  [ошибка] {sub}:\n{traceback.format_exc()}")
             result = None
         if result is None:
             log.append((sub, "skipped"))
@@ -183,7 +189,7 @@ def main():
     with open(os.path.join(OUT_DIR, "subject_log.json"), "w") as f:
         json.dump(log, f, indent=1, default=str)
     n_used = sum(1 for _, v in log if v != "skipped")
-    print(f"\n{n_used}/{len(ALL_SUBJECTS)} subjects used")
+    print(f"\n{n_used}/{len(ALL_SUBJECTS)} пациентов использовано")
 
     all_results = {}
     for contrast in CONTRASTS:
@@ -194,7 +200,7 @@ def main():
         labels = np.concatenate(pooled[contrast]["labels"], axis=0)
         side = np.concatenate(pooled[contrast]["side"], axis=0)
         pos_a, pos_b = np.where(side == "A")[0], np.where(side == "B")[0]
-        print(f"\n=== {contrast}: {len(pos_a)}/{len(pos_b)} voxels A/B ===")
+        print(f"\n=== {contrast}: {len(pos_a)}/{len(pos_b)} вокселей A/B ===")
 
         for fold_name, (train_idx, test_idx) in {"A_train_B_test": (pos_a, pos_b), "B_train_A_test": (pos_b, pos_a)}.items():
             _, hist, pred, probs = train_one_fold_multimodal(
@@ -227,7 +233,7 @@ def main():
     out_path = os.path.join(OUT_DIR, "glasser_summary.png")
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
-    print(f"\nSaved {out_path}")
+    print(f"\nСохранено: {out_path}")
 
 
 if __name__ == "__main__":

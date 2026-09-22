@@ -1,17 +1,20 @@
 """
-Downloads T1w structural scans for the given subjects directly from
-OpenNeuro's underlying S3 bucket and computes an approximate brain mask.
+Скачивает структурные T1w-снимки для заданных пациентов напрямую из
+S3-хранилища, на котором работает OpenNeuro, и вычисляет приближённую
+маску мозга.
 
-openneuro.org itself is blocked by this session's network egress policy, but
-the S3 bucket that actually backs it (s3.amazonaws.com/openneuro.org/...) is
-not, so this pulls data straight from there - no browser/API access to
-openneuro.org needed. Verified structure by listing the bucket:
+Сам openneuro.org заблокирован политикой сетевого доступа этой сессии, а
+вот S3-хранилище, которое фактически его обслуживает
+(s3.amazonaws.com/openneuro.org/...), - нет, поэтому данные берутся оттуда
+напрямую - доступ через браузер/API к openneuro.org не нужен. Структура
+проверена листингом хранилища:
     https://s3.amazonaws.com/openneuro.org/?list-type=2&prefix=ds004873/
 
-Note this only gets the *raw* T1w - ds004873's S3 copy has no `derivatives/`
-folder at all, just per-subject anat/ (T1w, MESE echoes) and func/
-(task-all_bold). The CMRO2/BOLD_percchange maps needed for real
-concordant/discordant labels are not hosted here (see README.md).
+Обратите внимание, что здесь скачивается только *исходный* (raw) T1w - в
+S3-копии ds004873 вообще нет папки `derivatives/`, только per-subject anat/
+(T1w, эхо MESE) и func/ (task-all_bold). Карты CMRO2/BOLD_percchange,
+нужные для реальных меток concordant/discordant, здесь не хранятся
+(см. README.md).
 """
 
 import os
@@ -34,7 +37,7 @@ def download_subject_t1(subject, data_dir=DATA_DIR):
     t1_path = os.path.join(anat_dir, f"{subject}_T1w.nii.gz")
     if not os.path.exists(t1_path):
         url = f"{BASE_URL}/{subject}/anat/{subject}_T1w.nii.gz"
-        print(f"downloading {url}")
+        print(f"скачивание {url}")
         urllib.request.urlretrieve(url, t1_path)
 
     mask_path = os.path.join(anat_dir, f"{subject}_brain_mask.nii.gz")

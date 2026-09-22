@@ -1,11 +1,13 @@
 """
-Experiment 2 (per the supervisor's plan): structural patch + plain BOLD
-signal (filtered_func, no contrast agent / no DSC) as a per-voxel time
-series input, alongside structural patches. Same real CMRO2/BOLD_percchange
-labels as scripts/run_real_experiment.py.
+Эксперимент 2 (по плану научного руководителя): структурный патч +
+обычный сигнал BOLD (filtered_func, без контрастного агента / без DSC) в
+качестве входного временного ряда на воксель, наряду со структурными
+патчами. Те же реальные метки CMRO2/BOLD_percchange, что и в
+scripts/run_real_experiment.py.
 
-Only run for subjects/contrasts where Experiment 1 (structural only)
-already ran, so results are directly comparable.
+Запускается только для пациентов/контрастов, для которых уже был выполнен
+Эксперимент 1 (только структура), чтобы результаты были напрямую
+сопоставимы.
 """
 
 import os
@@ -74,24 +76,24 @@ def main():
     fig, ax = plt.subplots(figsize=(10, 4.5))
     x = np.arange(len(labels_x))
     width = 0.35
-    ax.bar(x - width / 2, a_vals, width, label="A train / B test", color="#8e44ad")
-    ax.bar(x + width / 2, b_vals, width, label="B train / A test", color="#16a085")
-    ax.axhline(0.5, color="gray", linestyle=":", label="chance")
-    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="supervisor's target range")
+    ax.bar(x - width / 2, a_vals, width, label="обучение A / тест B", color="#8e44ad")
+    ax.bar(x + width / 2, b_vals, width, label="обучение B / тест A", color="#16a085")
+    ax.axhline(0.5, color="gray", linestyle=":", label="случайный уровень")
+    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="целевой диапазон научного руководителя")
     ax.set_xticks(x)
     ax.set_xticklabels(labels_x, fontsize=8)
     ax.set_ylim(0, 1)
-    ax.set_ylabel("test accuracy")
-    ax.set_title("Experiment 2: structural patch + plain BOLD signal (PatchBOLDNet)\nreal CMRO2 + BOLD_percchange labels")
+    ax.set_ylabel("точность на тесте")
+    ax.set_title("Эксперимент 2: структурный патч + обычный сигнал BOLD (PatchBOLDNet)\nреальные метки CMRO2 + BOLD_percchange")
     ax.legend(fontsize=8)
     fig.tight_layout()
     summary_path = os.path.join(OUT_DIR, "experiment2_summary.png")
     fig.savefig(summary_path, dpi=150)
     plt.close(fig)
-    print(f"\nSaved {summary_path}")
+    print(f"\nСохранено {summary_path}")
 
     all_accs = np.array(a_vals + b_vals)
-    print(f"\nOverall: mean={all_accs.mean():.3f} std={all_accs.std():.3f} n={len(all_accs)} runs")
+    print(f"\nОбщий итог: mean={all_accs.mean():.3f} std={all_accs.std():.3f} n={len(all_accs)} прогонов")
 
 
 if __name__ == "__main__":

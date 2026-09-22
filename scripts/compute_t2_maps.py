@@ -1,9 +1,10 @@
 """
-Runs the real (ported) T2-mapping step (src/qbold.py) on the real 8-echo
-MESE data for the given subjects and saves the resulting T2/amplitude/error
-maps under data/<subject>/qmri/. This is real, verified output - not a
-placeholder - but see src/qbold.py's module docstring for exactly what it
-is (T2 only) and is not (full R2'/OEF/CMRO2, which need data we don't have).
+Выполняет реальный (портированный) шаг построения карты T2 (src/qbold.py)
+на реальных 8-эховых данных MESE для заданных пациентов и сохраняет
+полученные карты T2/амплитуды/ошибки в data/<subject>/qmri/. Это реальный,
+проверенный результат - не заглушка - но точно, что это такое (только T2) и
+чем это не является (полный R2'/OEF/CMRO2, для которых нужны данные,
+которых у нас нет), см. в докстринге модуля src/qbold.py.
 """
 
 import os
@@ -51,7 +52,7 @@ if __name__ == "__main__":
     for sub in subjects:
         t2_path, err_path, brain_vals = compute_subject_t2(sub)
         print(
-            f"{sub}: T2 map -> {t2_path} "
-            f"(median T2 = {np.median(brain_vals):.1f} ms, "
-            f"n={brain_vals.size} voxels fit)"
+            f"{sub}: карта T2 -> {t2_path} "
+            f"(медианный T2 = {np.median(brain_vals):.1f} мс, "
+            f"n={brain_vals.size} вокселей подогнано)"
         )

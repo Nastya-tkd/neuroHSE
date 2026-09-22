@@ -1,23 +1,26 @@
 """
-Real (not proxy) statistical-reliability filtering: uses the source
-pipeline's own first-level BOLD activation Z-statistic
-(scripts/download_zstat.py) instead of |CMRO2_percchange| magnitude
-(scripts/run_reliability_filtered.py's proxy) to decide which voxels'
-concordant/discordant label to trust. This is the direct answer to "get
-a genuine statistical-uncertainty estimate instead of a proxy" - the
-z-statistic is literally an effect-size/standard-error ratio from the
-source GLM, not a magnitude heuristic invented for this project.
+Настоящая (а не проксирующая) фильтрация по статистической надёжности:
+использует собственную Z-статистику активации BOLD первого уровня из
+исходного конвейера (scripts/download_zstat.py) вместо величины
+|CMRO2_percchange| (прокси из scripts/run_reliability_filtered.py) для
+решения, какой метке concordant/discordant вокселя можно доверять. Это
+прямой ответ на запрос «получить подлинную оценку статистической
+неопределённости вместо прокси» - z-статистика буквально представляет
+собой отношение размера эффекта к стандартной ошибке из исходной GLM, а
+не эвристику по величине, придуманную для этого проекта.
 
-Same structural-only architecture (SimplePatchCNN, patch=9) and
-leakage-safe protocol as every other filtering experiment here, on the
-same voxels/subjects for direct comparability. Tiers: all / top 50% /
-top 25% by |z|, threshold fit on each fold's training side only.
+Та же архитектура только по структурным данным (SimplePatchCNN, patch=9)
+и тот же защищённый от утечки протокол, что и в остальных экспериментах
+с фильтрацией здесь, на тех же вокселях/пациентах для прямой
+сопоставимости. Уровни: all / top 50% / top 25% по |z|, порог подбирается
+только на обучающей части каждого разбиения.
 
-Learned from this project's own mistake (see README "methodological
-note" after the Buchel-motivated experiments): every tier's own trivial
-majority-class baseline is computed and reported *from the start* this
-time, not added after a promising-looking number, since filtering by
-any criterion correlated with the label can shift its class balance.
+Учтена собственная ошибка этого проекта (см. «методологическое
+примечание» в README после экспериментов, мотивированных работой Buchel):
+собственный тривиальный базовый уровень «большинство» для каждого уровня
+фильтрации вычисляется и сообщается *с самого начала*, а не добавляется
+задним числом после многообещающего числа, поскольку фильтрация по
+любому критерию, коррелирующему с меткой, может сместить баланс классов.
 """
 
 import os
@@ -75,10 +78,10 @@ def process_subject(sub):
     try:
         result, notes = load_subject_robust(sub)
     except Exception as e:
-        print(f"  [error] {sub}: {e}")
+        print(f"  [ошибка] {sub}: {e}")
         return None
     if result is None:
-        print(f"  [skip] {sub}: {notes}")
+        print(f"  [пропуск] {sub}: {notes}")
         return None
     t1, affine, mask, cmro2, bold_pct = result
 
@@ -97,16 +100,17 @@ def process_subject(sub):
 
         zstat = load_zstat(sub, contrast, t1.shape)
         if zstat is None:
-            print(f"  [skip contrast] {sub} {contrast}: no usable z-stat map")
+            print(f"  [пропуск контраста] {sub} {contrast}: нет пригодной карты z-статистики")
             continue
 
-        # The z-stat file only has real (nonzero) values within its own
-        # processing mask - only ~9% of this project's usual concordance-
-        # valid voxels overlap it (checked directly, not assumed). Ranking
-        # by |z| only makes sense *within* that covered subset - computing
-        # a percentile over a population that's ~91% exact zero would just
-        # give a threshold of 0 and filter nothing, which is what an
-        # earlier version of this script silently did.
+        # Файл z-статистики содержит реальные (ненулевые) значения только
+        # в пределах своей собственной маски обработки - лишь ~9% обычных
+        # вокселей этого проекта, валидных по concordance, пересекаются с
+        # ней (проверено напрямую, а не предполагается). Ранжирование по
+        # |z| имеет смысл только *внутри* этого покрытого подмножества -
+        # вычисление перцентиля по совокупности, которая ~91% состоит из
+        # точных нулей, просто даст порог 0 и ничего не отфильтрует, что
+        # ранняя версия этого скрипта незаметно и делала.
         z_covered = zstat != 0
         label_mask_2d = np.zeros_like(mask, dtype=bool)
         coords_all = labeled_voxel_coords(label, mask)
@@ -114,7 +118,7 @@ def process_subject(sub):
         combined = label_mask_2d & z_covered
         coords = np.argwhere(combined)
         if len(coords) < 100:
-            print(f"  [skip contrast] {sub} {contrast}: too few z-covered labeled voxels ({len(coords)})")
+            print(f"  [пропуск контраста] {sub} {contrast}: слишком мало размеченных вокселей с покрытием z ({len(coords)})")
             continue
         raw_labels = label[coords[:, 0], coords[:, 1], coords[:, 2]]
         labels = (raw_labels > 0).astype(np.float32)
@@ -155,7 +159,7 @@ def main():
         try:
             result = process_subject(sub)
         except Exception:
-            print(f"  [error] {sub}:\n{traceback.format_exc()}")
+            print(f"  [ошибка] {sub}:\n{traceback.format_exc()}")
             result = None
         if result is None:
             log.append({"subject": sub, "status": "skipped"})
@@ -171,7 +175,7 @@ def main():
     with open(os.path.join(OUT_DIR, "subject_log.json"), "w") as f:
         json.dump(log, f, indent=1, default=str)
     n_used = sum(1 for e in log if e["status"] == "used")
-    print(f"\n{n_used}/{len(ALL_SUBJECTS)} subjects used (have real z-stat map + >=1 contrast)")
+    print(f"\n{n_used}/{len(ALL_SUBJECTS)} пациентов использовано (есть реальная карта z-статистики + >=1 контраст)")
 
     all_results = {}
     for contrast in CONTRASTS:
@@ -184,7 +188,7 @@ def main():
         n_subjects = len(set(np.concatenate(pooled[contrast]["subject"], axis=0).tolist()))
 
         pos_a, pos_b = np.where(side == "A")[0], np.where(side == "B")[0]
-        print(f"\n=== {contrast}: {n_subjects} subjects, {len(pos_a)}/{len(pos_b)} voxels A/B ===")
+        print(f"\n=== {contrast}: {n_subjects} пациентов, {len(pos_a)}/{len(pos_b)} вокселей A/B ===")
 
         for fold_name, (train_idx, test_idx) in {
             "A_train_B_test": (pos_a, pos_b),
@@ -196,7 +200,7 @@ def main():
                 tr_keep = train_idx[zstat[train_idx] >= threshold]
                 te_keep = test_idx[zstat[test_idx] >= threshold]
                 if len(tr_keep) < 50 or len(te_keep) < 50 or len(np.unique(labels[tr_keep])) < 2 or len(np.unique(labels[te_keep])) < 2:
-                    print(f"  {fold_name} {tier_name}: skipped (too few voxels/classes after filtering)")
+                    print(f"  {fold_name} {tier_name}: пропущено (слишком мало вокселей/классов после фильтрации)")
                     continue
 
                 test_conc_frac = labels[te_keep].mean()
@@ -207,7 +211,7 @@ def main():
                     epochs=15, device="cpu", seed=SEED, model_factory=SimplePatchCNN,
                 )
                 acc = hist["val_acc"][-1]
-                beats = "YES" if acc > majority_baseline else "no"
+                beats = "ДА" if acc > majority_baseline else "нет"
                 print(f"  {fold_name} {tier_name}: n_train={len(tr_keep)} n_test={len(te_keep)} "
                       f"acc={acc:.3f} majority_baseline={majority_baseline:.3f} beats_baseline={beats}")
                 all_results[(contrast, fold_name, tier_name)] = {
@@ -244,7 +248,7 @@ def main():
     out_path = os.path.join(OUT_DIR, "zstat_reliability_summary.png")
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
-    print(f"\nSaved {out_path}")
+    print(f"\nСохранено: {out_path}")
 
 
 if __name__ == "__main__":

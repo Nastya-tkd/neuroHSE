@@ -1,26 +1,27 @@
 """
-Registers the real Glasser/HCP-MMP1.0 cortical parcellation (360 areas,
-180/hemisphere) into each subject's own T2-space grid, via ANTsPy SyN
-registration against a bundled MNI152 T1 template - no external atlas
-host or registration software needed beyond two PyPI packages (antspyx,
-nilearn), both reachable in this session.
+Регистрирует настоящую корковую парцелляцию Glasser/HCP-MMP1.0 (360
+областей, по 180 на полушарие) в собственную сетку пространства T2 каждого
+пациента через ANTsPy SyN-регистрацию к встроенному шаблону MNI152 T1 - не
+нужен ни внешний хост атласа, ни программа регистрации, кроме двух пакетов
+PyPI (antspyx, nilearn), оба доступны в этой сессии.
 
-Honesty note, directly from the atlas's own maintainer (see
-atlas_cache/ORIGIN.md and https://github.com/mbedini/The-HCP-MMP1.0-atlas-in-FSL):
-HCP-MMP1.0 was built and validated for *surface-based* registration
-(FreeSurfer + Connectome Workbench); using it via *volumetric* MNI
-registration, as this module does, is explicitly flagged by the atlas's
-creators (citing Coalson, Van Essen & Glasser 2018, PNAS) as introducing
-real boundary imprecision - this is a coarse volumetric approximation of
-Glasser, not the methodologically preferred surface-based version. Also
-note the atlas was mapped onto an ICBM2009c-like template, while the
-registration target here is nilearn's bundled MNI152 template (a
-different, though closely related, MNI variant) - a second source of
-approximation. Reported as such, not oversold as "the" atlas.
+Замечание для честности, напрямую от сопровождающего самого атласа (см.
+atlas_cache/ORIGIN.md и
+https://github.com/mbedini/The-HCP-MMP1.0-atlas-in-FSL): HCP-MMP1.0 был
+создан и валидирован для *поверхностной* регистрации (FreeSurfer +
+Connectome Workbench); использование его через *объёмную* MNI-регистрацию,
+как делает этот модуль, явно отмечено создателями атласа (со ссылкой на
+Coalson, Van Essen & Glasser 2018, PNAS) как вносящее реальную неточность
+границ - это грубое объёмное приближение Glasser, а не методологически
+предпочтительная поверхностная версия. Также отметим, что атлас был
+привязан к шаблону типа ICBM2009c, тогда как целью регистрации здесь
+служит встроенный в nilearn шаблон MNI152 (другой, хотя и близкий вариант
+MNI) - второй источник приближения. Указано как есть, а не преподнесено как
+"тот самый" атлас.
 
-Registration takes ~5-10s/subject (SyN, low-res 2mm template) - cheap
-enough to just compute per subject and cache to disk, not worth
-pre-baking into the repo.
+Регистрация занимает ~5-10с на пациента (SyN, низкое разрешение шаблона
+2мм) - достаточно дёшево, чтобы просто вычислять по пациенту и кэшировать
+на диск, не стоит запекать заранее в репозиторий.
 """
 
 import os
@@ -35,7 +36,7 @@ _atlas_image = None
 
 
 def _ensure_mni_template():
-    """Bundled with nilearn (no network fetch) - cached to disk once as a plain nifti."""
+    """Поставляется вместе с nilearn (без сетевого запроса) - кэшируется на диск один раз как обычный nifti."""
     if os.path.exists(MNI_TEMPLATE_PATH):
         return
     import nibabel as nib
@@ -47,10 +48,10 @@ def _ensure_mni_template():
 
 def get_subject_glasser_atlas(subject, t1_path, cache_dir=ATLAS_CACHE_DIR):
     """
-    Returns an (X,Y,Z) int array, same shape/grid as the subject's T1
-    (space-T2), with Glasser parcel labels (0=background/non-cortex,
-    1-180=left hemisphere areas, 1000-1180=right hemisphere areas).
-    Cached to disk per subject after the first call.
+    Возвращает целочисленный массив (X,Y,Z) той же формы/сетки, что и T1
+    пациента (space-T2), с метками parcel'ов Glasser (0=фон/не кора,
+    1-180=области левого полушария, 1000-1180=области правого полушария).
+    Кэшируется на диск для каждого пациента после первого вызова.
     """
     import ants
 
@@ -61,8 +62,8 @@ def get_subject_glasser_atlas(subject, t1_path, cache_dir=ATLAS_CACHE_DIR):
 
     if not os.path.exists(ATLAS_LABELS_PATH):
         raise FileNotFoundError(
-            f"{ATLAS_LABELS_PATH} missing - clone github.com/mbedini/The-HCP-MMP1.0-atlas-in-FSL "
-            "and copy MNI_Glasser_HCP_v1.0.nii.gz there first."
+            f"{ATLAS_LABELS_PATH} отсутствует - сначала клонируйте github.com/mbedini/The-HCP-MMP1.0-atlas-in-FSL "
+            "и скопируйте туда MNI_Glasser_HCP_v1.0.nii.gz."
         )
     _ensure_mni_template()
 

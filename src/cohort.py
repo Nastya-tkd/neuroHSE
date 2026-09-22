@@ -1,16 +1,17 @@
 """
-The valid subject cohort for the calibrated-fMRI experiment (excludes the
-separate dp-/r- prefixed control/replication-study subjects, which use a
-different design). Derived from ds004873/participants.tsv (recovered via
-S3 version history, see scripts/download_real_labels.py) by keeping every
-sub-pXXX row with a non-empty Hct value and no "EXCLUDED" comment. Matches
-the paper's own "N40" cohort size (seen in derivative filenames like
-N40_cond-control_space-MNI152_median_cbf.nii.gz).
+Валидная когорта пациентов для эксперимента с калиброванной фМРТ
+(исключает отдельных пациентов с префиксами dp-/r- из контрольного
+исследования/исследования репликации, использующих другой дизайн).
+Получена из ds004873/participants.tsv (восстановлен через историю версий
+S3, см. scripts/download_real_labels.py) отбором каждой строки sub-pXXX с
+непустым значением Hct и без комментария "EXCLUDED". Совпадает с размером
+собственной когорты "N40" из статьи (видна в именах производных файлов
+вроде N40_cond-control_space-MNI152_median_cbf.nii.gz).
 
-Excluded (per participants.tsv comments): sub-p022 (behavioral problems),
-sub-p024/sub-p025 (contrast agent did not reach participant),
-sub-p042 (CBF maps unilateral), sub-p053 (T2* maps unilateral),
-sub-p056 (movement artifacts/ringing), sub-p062 (susceptibility artifacts).
+Исключены (согласно комментариям в participants.tsv): sub-p022 (проблемы
+поведения), sub-p024/sub-p025 (контрастное вещество не достигло пациента),
+sub-p042 (карты CBF односторонние), sub-p053 (карты T2* односторонние),
+sub-p056 (артефакты движения/звон), sub-p062 (артефакты восприимчивости).
 """
 
 ALL_SUBJECTS = [

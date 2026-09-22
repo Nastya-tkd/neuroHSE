@@ -1,28 +1,29 @@
 """
-Downloads the real per-voxel first-level GLM Z-statistic map for the
-BOLD activation contrast (calc>control / mem>control), recovered the
-same way as everything else via S3 version history.
+Скачивает реальную повоксельную карту Z-статистики GLM первого уровня для
+контраста активации BOLD (calc>control / mem>control), восстановленную тем
+же способом, что и всё остальное, через историю версий S3.
 
-Found by reading the source pipeline's own analysis notebooks
-(github.com/NeuroenergeticsLab/two_modes_of_hemodynamics,
+Обнаружено при чтении собственных аналитических ноутбуков исходного
+конвейера (github.com/NeuroenergeticsLab/two_modes_of_hemodynamics,
 D_Fig2C_native_space_analysis.ipynb / Replication_data_analyses.ipynb):
-`{sub}_1stlevel_{contrast}control_space-T2.nii.gz` is the first-level
-FSL z-statistic for that exact contrast, thresholded at z=2.5 in the
-source pipeline's own ROI-definition step (`z_thr=2.5`). This is a
-genuine per-voxel statistical-confidence map, not the |CMRO2_percchange|
-magnitude proxy used in scripts/run_reliability_filtered.py - it
-directly answers "how much can this specific voxel's activation
-estimate be trusted", the actual quantity Buchel et al. (2026) argue
-drives most of the apparent concordant/discordant "noise".
+`{sub}_1stlevel_{contrast}control_space-T2.nii.gz` - это z-статистика FSL
+первого уровня для данного конкретного контраста, пороговая на z=2.5 на
+собственном шаге определения ROI исходного конвейера (`z_thr=2.5`). Это
+настоящая повоксельная карта статистической достоверности, а не proxy-
+величина |CMRO2_percchange|, используемая в scripts/run_reliability_filtered.py
+- она напрямую отвечает на вопрос "насколько можно доверять оценке
+активации именно этого вокселя", ту самую величину, которая, по мнению
+Buchel et al. (2026), определяет большую часть кажущегося "шума"
+concordant/discordant.
 
-Caveat, disclosed rather than glossed over: this Z-statistic is for the
-BOLD side of the contrast only (fMRI activation), not a joint BOLD+CMRO2
-uncertainty estimate - the source pipeline itself reuses this same map
-as the shared significance gate for CBF/OEF/CMRO2 ROI analyses too (see
-the notebook: qBOLD-derived quantities are masked with this same
-z-thresholded BOLD map, not their own independent statistic), so this is
-the closest genuine, non-proxy reliability signal available in this
-dataset for either variable.
+Оговорка, а не умолчание: эта Z-статистика относится только к стороне BOLD
+контраста (активация фМРТ), а не к совместной оценке неопределённости
+BOLD+CMRO2 - сам исходный конвейер повторно использует эту же карту как
+общий порог значимости и для ROI-анализов CBF/OEF/CMRO2 (см. ноутбук:
+величины, производные от qBOLD, маскируются той же пороговой по z картой
+BOLD, а не собственной независимой статистикой), так что это ближайший
+настоящий, не-proxy сигнал надёжности, доступный в этом датасете для
+любой из переменных.
 """
 
 import os
@@ -35,9 +36,9 @@ from scripts.download_real_labels import download_versioned, DATA_DIR, VERSIONS_
 
 
 def download_subject_zstat(subject, contrast, versions_cache_dir=VERSIONS_CACHE_DIR, data_dir=DATA_DIR):
-    """contrast: 'calc' or 'mem'. Returns the local path, or None if this
-    subject/contrast doesn't have this file (matches the same coverage
-    gaps as everything else - not every subject has every contrast)."""
+    """contrast: 'calc' или 'mem'. Возвращает локальный путь, либо None,
+    если для этого пациента/контраста такого файла нет (те же пробелы в
+    покрытии, что и везде - не у каждого пациента есть каждый контраст)."""
     suffix = f"_1stlevel_{contrast}control_space-T2.nii.gz"
     cache_path = os.path.join(versions_cache_dir, f"{subject}.json")
     version_map = get_or_build_version_map(f"ds004873/derivatives/{subject}/", cache_path)

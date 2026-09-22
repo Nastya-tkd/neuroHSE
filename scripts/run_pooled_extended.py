@@ -1,24 +1,27 @@
 """
-Two follow-up experiments on the same real pooled-cohort data as
-scripts/run_pooled_cohort.py (25/40 subjects, see that script and
-README.md for why), both per direct user request:
+Два дополнительных эксперимента на тех же реальных данных объединённой
+когорты, что и в scripts/run_pooled_cohort.py (25/40 пациентов, см. этот
+скрипт и README.md для объяснения), оба по прямому запросу пользователя:
 
-1. Larger spatial context: patch_size 15 (~30x30x50mm physical, vs the
-   original 9 -> ~18x18x30mm) instead of just the small local cube - the
-   "whole-ROI-scale features" step named in the supervisor's own plan as
-   the fallback once "more data" alone wasn't the answer.
-2. Regression instead of classification: predict the continuous
-   CMRO2_percchange value directly (src/train.py:train_one_fold_regression)
-   instead of thresholding it to a sign and combining with BOLD's sign.
-   Preserves magnitude information the binary label throws away, and is a
-   materially different question ("how much did CMRO2 move" vs "did it
-   move the same way as BOLD").
+1. Более широкий пространственный контекст: patch_size 15 (~30x30x50 мм
+   физически, против исходных 9 -> ~18x18x30 мм) вместо небольшого
+   локального куба - шаг «признаки в масштабе всего ROI», названный в
+   плане самого руководителя как запасной вариант на случай, если одно
+   лишь «больше данных» не станет решением.
+2. Регрессия вместо классификации: предсказание непрерывного значения
+   CMRO2_percchange напрямую (src/train.py:train_one_fold_regression)
+   вместо приведения его к знаку и объединения со знаком BOLD.
+   Сохраняет информацию о величине, которую бинарная метка отбрасывает,
+   и представляет собой содержательно другой вопрос («насколько сильно
+   изменился CMRO2» против «изменился ли он в ту же сторону, что и
+   BOLD»).
 
-Downloads each subject's data ONCE and extracts patches at BOTH sizes (9
-and 15) so all 4 combinations (classification/regression x patch 9/15) are
-directly comparable within one data pass rather than four separate,
-possibly inconsistent downloads. Same leakage-safe pooled hemisphere split
-as before.
+Данные каждого пациента скачиваются ОДИН РАЗ, а патчи извлекаются ОБОИХ
+размеров (9 и 15), так что все 4 комбинации (классификация/регрессия x
+патч 9/15) напрямую сопоставимы в рамках одного прохода по данным, а не
+четырёх отдельных, потенциально несогласованных скачиваний. То же
+защищённое от утечки разбиение объединённой когорты по полушариям, что
+и раньше.
 """
 
 import os
@@ -70,9 +73,10 @@ def load_subject_core(sub):
 
 
 def build_targets(cmro2, bold_pct, mask, contrast):
-    """Returns (binary_label, continuous_pct) - same validity mask as the
-    classification experiments, so both targets are computed over the
-    identical voxel set for a fair comparison."""
+    """Возвращает (binary_label, continuous_pct) - та же маска валидности,
+    что и в экспериментах с классификацией, поэтому обе целевые
+    переменные вычисляются на одном и том же множестве вокселей для
+    честного сравнения."""
     cmro2_task = cmro2[contrast]
     cmro2_control = cmro2["control"]
     bold = bold_pct[contrast]
@@ -92,19 +96,19 @@ def build_targets(cmro2, bold_pct, mask, contrast):
 
 
 def process_subject(sub):
-    """Returns {contrast: {"patches": {9: arr, 15: arr}, "binary_label":...,
-    "continuous_target":..., "side":...}} or None if skipped."""
+    """Возвращает {contrast: {"patches": {9: arr, 15: arr}, "binary_label":...,
+    "continuous_target":..., "side":...}} или None, если пациент пропущен."""
     try:
         download_subject_labels(sub)
         download_subject_events(sub)
     except Exception as e:
-        print(f"  [skip] {sub}: missing core files ({e})")
+        print(f"  [пропуск] {sub}: отсутствуют базовые файлы ({e})")
         return None
 
     try:
         t1, affine, mask, cmro2, bold_pct = load_subject_core(sub)
     except Exception as e:
-        print(f"  [skip] {sub}: failed to load core files ({e})")
+        print(f"  [пропуск] {sub}: не удалось загрузить базовые файлы ({e})")
         return None
 
     targets_by_contrast = {}
@@ -112,27 +116,28 @@ def process_subject(sub):
         binary_label, continuous, valid = build_targets(cmro2, bold_pct, mask, contrast)
         n_conc, n_disc = int((binary_label > 0).sum()), int((binary_label < 0).sum())
         if min(n_conc, n_disc) < 20:
-            print(f"  [skip contrast] {sub} {contrast}: degenerate label")
+            print(f"  [пропуск контраста] {sub} {contrast}: вырожденная метка")
             continue
         targets_by_contrast[contrast] = (binary_label, continuous)
 
     if not targets_by_contrast:
         return None
 
-    # events.tsv not strictly needed for these two experiments (no BOLD
-    # input feature this time), but we still require it so the voxel/subject
-    # set stays identical to the earlier BOLD-condition experiment for
-    # comparability, and to skip subjects consistently with that run.
+    # events.tsv строго не нужен для этих двух экспериментов (на этот раз
+    # BOLD не используется как входной признак), но мы всё равно требуем
+    # его, чтобы множество вокселей/пациентов оставалось идентичным
+    # предыдущему эксперименту с условием BOLD для сопоставимости, и
+    # чтобы пропускать пациентов согласованно с тем запуском.
     try:
-        download_subject_bold(sub)  # downloads and immediately unused; ensures comparable subject set
+        download_subject_bold(sub)  # скачивается, но сразу не используется; обеспечивает сопоставимое множество пациентов
     except Exception as e:
-        print(f"  [skip] {sub}: missing BOLD ({e})")
+        print(f"  [пропуск] {sub}: отсутствует BOLD ({e})")
         return None
     bold_path = os.path.join(DATA_DIR, sub, "derivatives", f"{sub}_task-all_space-T2_filtered_func.nii.gz")
 
     midpoint = hemisphere_midpoint(t1.shape, axis_index=0)
     max_patch = max(PATCH_SIZES)
-    margin = max_patch // 2  # use the largest patch's margin so BOTH patch sizes stay leakage-safe
+    margin = max_patch // 2  # используем отступ для самого большого патча, чтобы ОБА размера патчей оставались защищёнными от утечки
     rng = np.random.default_rng(hash(sub) % (2**31))
 
     out = {}
@@ -184,7 +189,7 @@ def main():
         try:
             result = process_subject(sub)
         except Exception:
-            print(f"  [error] {sub}:\n{traceback.format_exc()}")
+            print(f"  [ошибка] {sub}:\n{traceback.format_exc()}")
             result = None
         if result is None:
             log.append((sub, "skipped"))
@@ -204,7 +209,7 @@ def main():
     all_results = {}
     for contrast in CONTRASTS:
         if not pooled[contrast]["binary_label"]:
-            print(f"{contrast}: no usable subjects, skipping")
+            print(f"{contrast}: нет подходящих пациентов, пропуск")
             continue
         patches = {p: np.concatenate(pooled[contrast]["patches"][p], axis=0) for p in PATCH_SIZES}
         binary_label = np.concatenate(pooled[contrast]["binary_label"], axis=0)
@@ -214,7 +219,7 @@ def main():
 
         pos_a = np.where(side == "A")[0]
         pos_b = np.where(side == "B")[0]
-        print(f"\n=== {contrast}: {n_subjects} subjects, {len(pos_a)}/{len(pos_b)} voxels A/B ===")
+        print(f"\n=== {contrast}: {n_subjects} пациентов, {len(pos_a)}/{len(pos_b)} вокселей A/B ===")
 
         for fold_name, (train_idx, test_idx) in {
             "A_train_B_test": (pos_a, pos_b),
@@ -236,7 +241,7 @@ def main():
                 r2 = hist_reg["test_r2"][-1]
                 corr = float(np.corrcoef(ytrue_reg, pred_reg)[0, 1]) if np.std(pred_reg) > 1e-8 else 0.0
 
-                print(f"  {fold_name} patch={patch_size}: classification acc={acc:.3f}  regression R2={r2:.3f} r={corr:.3f}")
+                print(f"  {fold_name} patch={patch_size}: точность классификации acc={acc:.3f}  регрессия R2={r2:.3f} r={corr:.3f}")
                 key = (contrast, fold_name, patch_size)
                 all_results[key] = {"classification_acc": acc, "regression_r2": r2, "regression_corr": corr}
 
@@ -248,7 +253,7 @@ def main():
     with open(os.path.join(OUT_DIR, "all_results.json"), "w") as f:
         json.dump({f"{c}|{f}|{p}": r for (c, f, p), r in all_results.items()}, f, indent=1)
 
-    # summary plots
+    # сводные графики
     fig, axes = plt.subplots(1, 2, figsize=(13, 4.5))
     labels_x = sorted(set((c, f) for (c, f, p) in all_results.keys()))
     x = np.arange(len(labels_x))
@@ -278,7 +283,7 @@ def main():
     out_path = os.path.join(OUT_DIR, "pooled_extended_summary.png")
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
-    print(f"\nSaved {out_path}")
+    print(f"\nСохранено: {out_path}")
 
 
 if __name__ == "__main__":

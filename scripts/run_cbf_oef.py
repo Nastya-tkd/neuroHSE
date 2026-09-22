@@ -1,34 +1,38 @@
 """
-The one genuinely new, not-yet-blocked lever left: baseline (control-
-condition) CBF and OEF maps as extra input channels alongside T1,
-instead of yet another way of looking at anatomical intensity.
+Единственный по-настоящему новый, ещё не заблокированный рычаг: базовые
+(в покое, control-условие) карты CBF и OEF в качестве дополнительных
+входных каналов вместе с T1, вместо очередного способа смотреть на
+анатомическую интенсивность.
 
-Motivation (see README/report discussion): T1 intensity reflects tissue
-composition (myelin/water/macromolecule content) - it does not directly
-encode the physiological quantities that mechanically determine whether
-BOLD and CMRO2 move together or oppositely (baseline perfusion, baseline
-oxygen extraction, neurovascular coupling gain). CBF and OEF baseline
-maps get much closer to those quantities directly, and - unlike a real
-anatomical atlas - they're already sitting in this dataset's own S3
-version history, not on a blocked external host.
+Мотивация (см. обсуждение в README/отчёте): интенсивность T1 отражает
+состав ткани (содержание миелина/воды/макромолекул) - она напрямую не
+кодирует физиологические величины, которые механически определяют,
+движутся ли BOLD и CMRO2 в одну сторону или в противоположные (базовая
+перфузия, базовая экстракция кислорода, коэффициент нейрососудистого
+сопряжения). Базовые карты CBF и OEF гораздо ближе напрямую к этим
+величинам, и - в отличие от настоящего анатомического атласа - они уже
+есть в собственной истории версий S3 этого датасета, а не на заблокированном
+внешнем хосте.
 
-Non-circularity: only the *control*-condition (resting-state) CBF/OEF are
-used, never the task-condition values. The concordant/discordant label is
-defined by the *change* between task and control
-(sign(BOLD_percchange) x sign(CMRO2_percchange)); baseline-only values are
-not part of that computation, so this is a genuine physiological-covariate
-experiment, not label leakage. (Baseline CMRO2_control = CBF_control x
-OEF_control x CaO2 by Fick's principle - the same relationship the source
-pipeline used to originally compute CMRO2 control - so CBF/OEF baseline
-values are physiologically upstream of the label, not a restatement of it.)
+Нециркулярность: используются только CBF/OEF *control*-условия (состояние
+покоя), значения условия задачи никогда не используются. Метка
+concordant/discordant определяется *изменением* между задачей и control
+(sign(BOLD_percchange) x sign(CMRO2_percchange)); значения только базового
+уровня не участвуют в этом вычислении, поэтому это настоящий эксперимент с
+физиологической ковариатой, а не утечка метки. (Базовый CMRO2_control =
+CBF_control x OEF_control x CaO2 по принципу Фика - то же самое отношение,
+которое исходный конвейер использовал для изначального вычисления базового
+CMRO2, - поэтому базовые значения CBF/OEF физиологически предшествуют
+метке, а не являются её пересказом.)
 
-Runs two models per contrast per fold direction, apples-to-apples on the
-exact same voxels/patches:
-  - structural-only (T1, 1 channel) - the same baseline as every earlier
-    experiment, recomputed here for a fair comparison rather than reusing
-    old numbers (different, CBF/OEF-limited subject subset).
-  - structural + baseline CBF/OEF (T1+CBF+OEF, 3 channels, co-registered
-    and independently normalized per channel).
+Запускает две модели на каждый контраст и каждое направление разбиения,
+на абсолютно тех же вокселях/патчах, для честного сравнения:
+  - только структура (T1, 1 канал) - тот же базовый уровень, что и в
+    каждом более раннем эксперименте, пересчитанный здесь заново для
+    честного сравнения, а не повторное использование старых чисел (другая,
+    ограниченная наличием CBF/OEF подвыборка пациентов).
+  - структура + базовые CBF/OEF (T1+CBF+OEF, 3 канала, совмещённые и
+    независимо нормализованные по каждому каналу).
 """
 
 import os
@@ -77,8 +81,8 @@ def build_label(cmro2, bold_pct, mask, contrast):
 
 
 def load_cbf_oef(sub, mask, expected_shape):
-    """Baseline CBF/OEF, brain-masked and cleaned of non-finite noise
-    outside the mask (these raw qmri maps aren't pre-skull-stripped)."""
+    """Базовые CBF/OEF, замаскированные по мозгу и очищенные от нефинитного
+    шума вне маски (эти исходные qmri-карты не были заранее лишены черепа)."""
     files = download_subject_cbf_oef(sub)
     if len(files) < 2:
         return None
@@ -98,16 +102,16 @@ def process_subject(sub):
     try:
         result, notes = load_subject_robust(sub)
     except Exception as e:
-        print(f"  [error] {sub}: {e}")
+        print(f"  [ошибка] {sub}: {e}")
         return None
     if result is None:
-        print(f"  [skip] {sub}: {notes}")
+        print(f"  [пропуск] {sub}: {notes}")
         return None
     t1, affine, mask, cmro2, bold_pct = result
 
     cbf_oef = load_cbf_oef(sub, mask, t1.shape)
     if cbf_oef is None:
-        print(f"  [skip] {sub}: no usable baseline CBF/OEF")
+        print(f"  [пропуск] {sub}: нет пригодных базовых CBF/OEF")
         return None
     cbf, oef = cbf_oef
 
@@ -163,7 +167,7 @@ def main():
         try:
             result = process_subject(sub)
         except Exception:
-            print(f"  [error] {sub}:\n{traceback.format_exc()}")
+            print(f"  [ошибка] {sub}:\n{traceback.format_exc()}")
             result = None
         if result is None:
             log.append({"subject": sub, "status": "skipped"})
@@ -179,12 +183,12 @@ def main():
     with open(os.path.join(OUT_DIR, "subject_log.json"), "w") as f:
         json.dump(log, f, indent=1, default=str)
     n_used = sum(1 for e in log if e["status"] == "used")
-    print(f"\n{n_used}/{len(ALL_SUBJECTS)} subjects used (have baseline CBF/OEF + >=1 contrast)")
+    print(f"\nИспользовано пациентов: {n_used}/{len(ALL_SUBJECTS)} (есть базовые CBF/OEF + >=1 контраст)")
 
     all_results = {}
     for contrast in CONTRASTS:
         if not pooled[contrast]["patches_1ch"]:
-            print(f"{contrast}: no usable subjects, skipping")
+            print(f"{contrast}: нет пригодных пациентов, пропуск")
             continue
         patches_1ch = np.concatenate(pooled[contrast]["patches_1ch"], axis=0)
         patches_3ch = np.concatenate(pooled[contrast]["patches_3ch"], axis=0)
@@ -193,7 +197,7 @@ def main():
         n_subjects = len(set(np.concatenate(pooled[contrast]["subject"], axis=0).tolist()))
 
         pos_a, pos_b = np.where(side == "A")[0], np.where(side == "B")[0]
-        print(f"\n=== {contrast}: {n_subjects} subjects, {len(pos_a)} side-A voxels, {len(pos_b)} side-B voxels ===")
+        print(f"\n=== {contrast}: {n_subjects} пациентов, {len(pos_a)} вокселей стороны A, {len(pos_b)} вокселей стороны B ===")
 
         for fold_name, (train_idx, test_idx) in {
             "A_train_B_test": (pos_a, pos_b),
@@ -212,7 +216,7 @@ def main():
             )
             acc_phys = hist_phys["val_acc"][-1]
 
-            print(f"  {fold_name}: structural-only(T1)={acc_struct:.3f}  +baseline CBF/OEF={acc_phys:.3f}")
+            print(f"  {fold_name}: только структура(T1)={acc_struct:.3f}  +базовые CBF/OEF={acc_phys:.3f}")
             all_results[(contrast, fold_name)] = {
                 "structural_only": acc_struct, "structural_plus_cbf_oef": acc_phys, "n_subjects": n_subjects,
             }
@@ -231,21 +235,21 @@ def main():
     fig, ax = plt.subplots(figsize=(8, 4.5))
     x = np.arange(len(labels_x))
     width = 0.35
-    ax.bar(x - width / 2, struct_vals, width, label="T1 only", color="#7f8c8d")
-    ax.bar(x + width / 2, phys_vals, width, label="T1 + baseline CBF/OEF", color="#c0392b")
-    ax.axhline(0.5, color="gray", linestyle=":", label="chance")
-    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="target range")
+    ax.bar(x - width / 2, struct_vals, width, label="только T1", color="#7f8c8d")
+    ax.bar(x + width / 2, phys_vals, width, label="T1 + базовые CBF/OEF", color="#c0392b")
+    ax.axhline(0.5, color="gray", linestyle=":", label="случайный уровень")
+    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="целевой диапазон")
     ax.set_xticks(x)
     ax.set_xticklabels(labels_x, fontsize=9)
     ax.set_ylim(0, 1)
-    ax.set_ylabel("test accuracy")
-    ax.set_title("T1-only vs. T1+baseline CBF/OEF (physiological structure)")
+    ax.set_ylabel("точность на тесте")
+    ax.set_title("Только T1 против T1+базовые CBF/OEF (физиологическая структура)")
     ax.legend(fontsize=8)
     fig.tight_layout()
     out_path = os.path.join(OUT_DIR, "cbf_oef_summary.png")
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
-    print(f"\nSaved {out_path}")
+    print(f"\nСохранено {out_path}")
 
 
 if __name__ == "__main__":

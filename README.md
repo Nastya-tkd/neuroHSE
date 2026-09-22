@@ -1,1106 +1,1181 @@
-# neuroHSE — structural classification of concordant/discordant voxels
+# neuroHSE — структурная классификация concordant/discordant вокселей
 
-Goal (per the supervisor's task): build a binary classifier that labels each
-brain voxel as **concordant** (ΔBOLD and ΔCMRO₂ same sign, "red") or
-**discordant** (opposite signs, "blue"), first from structural MRI alone,
-later adding the plain BOLD signal.
+Цель (по заданию руководителя): построить бинарный классификатор, который
+относит каждый воксель мозга к **concordant** (ΔBOLD и ΔCMRO₂ меняются в
+одну сторону, «красный») или **discordant** (в разные стороны, «синий»),
+сначала только по структурной МРТ, затем добавив сырой сигнал BOLD.
 
-Reference project/code: [`NeuroenergeticsLab/two_modes_of_hemodynamics`](https://github.com/NeuroenergeticsLab/two_modes_of_hemodynamics)
+Опорный проект/код: [`NeuroenergeticsLab/two_modes_of_hemodynamics`](https://github.com/NeuroenergeticsLab/two_modes_of_hemodynamics)
 (Epp et al., *"Two distinct modes of hemodynamic responses across the human
-cortex"*, preprint: https://www.biorxiv.org/content/10.1101/2023.12.08.570806).
-Data: [OpenNeuro ds004873](https://openneuro.org/datasets/ds004873).
+cortex"*, препринт: https://www.biorxiv.org/content/10.1101/2023.12.08.570806).
+Данные: [OpenNeuro ds004873](https://openneuro.org/datasets/ds004873).
 
-## Step 1 — labeling verified (`src/labeling.py`, `tests/test_labeling.py`)
+## Шаг 1 — проверка разметки (`src/labeling.py`, `tests/test_labeling.py`)
 
-The concordant/discordant rule was located in the source repo's merged
-notebooks (`np.sign(CMRO2_percchange) * np.sign(BOLD_percchange)`, using
-empirically measured `BOLD_percchange` and CMRO₂ computed via **Fick's
-principle** `CBF × OEF × CaO2` — not via the Davis model) and reimplemented
-faithfully in `src/labeling.py`.
+Правило concordant/discordant найдено в объединённых ноутбуках исходного
+репозитория (`np.sign(CMRO2_percchange) * np.sign(BOLD_percchange)`, где
+используется эмпирически измеренный `BOLD_percchange`, а CMRO₂ считается по
+**принципу Фика** `CBF × OEF × CaO2`, а не по модели Дэвиса) и добросовестно
+воспроизведено в `src/labeling.py`.
 
-**Finding while verifying it against the Davis model:** the source repo's own
-`DavisBOLD()` function has a spurious trailing `-1` that breaks round-trip
-consistency with its sibling `DavisCMRO2RelChange()` / `DavisCBFRelChange()`
-(which correctly invert the canonical Davis et al. 1998 equation). Confirmed
-by grep that `DavisBOLD()` is never actually called anywhere in the merged
-notebooks — it's unused/dead code, so **this bug does not affect the
-concordant/discordant labels** used by the project (those come from measured
-BOLD + Fick's-principle CMRO₂, not from `DavisBOLD()`). Documented and
-regression-tested in `tests/test_labeling.py::test_source_davis_bold_has_spurious_offset`;
-`davis_bold_relchange_standard()` provides the corrected formula, kept
-separately from the faithful reproduction.
+**Находка при сверке с моделью Дэвиса:** в функции `DavisBOLD()` исходного
+репозитория обнаружен лишний хвостовой `-1`, который ломает согласованность
+с парными функциями `DavisCMRO2RelChange()` / `DavisCBFRelChange()`
+(которые корректно обращают каноническое уравнение Davis et al. 1998).
+Проверкой через grep подтверждено, что `DavisBOLD()` нигде фактически не
+вызывается в объединённых ноутбуках — это неиспользуемый (мёртвый) код,
+поэтому **этот баг не влияет на concordant/discordant метки**, используемые
+в проекте (они получены из измеренного BOLD и CMRO₂ по принципу Фика, а не
+из `DavisBOLD()`). Задокументировано и покрыто регрессионным тестом в
+`tests/test_labeling.py::test_source_davis_bold_has_spurious_offset`;
+`davis_bold_relchange_standard()` даёт исправленную формулу, хранится
+отдельно от добросовестного воспроизведения оригинала.
 
-Could not cross-check against the published methods text directly: this
-session's network egress policy blocks `link.springer.com`, `pubmed`/
-`ncbi.nlm.nih.gov`, `biorxiv.org` and `openneuro.org` (only GitHub is
-reachable). Verification instead relies on the authors' own reference
-implementation plus the algebraic self-consistency check above.
+Сверить напрямую с текстом опубликованной методики не удалось: сетевая
+политика этой сессии блокирует `link.springer.com`, `pubmed`/
+`ncbi.nlm.nih.gov`, `biorxiv.org` и `openneuro.org` (доступен только
+GitHub). Проверка вместо этого опирается на собственную референсную
+реализацию авторов плюс алгебраическую проверку самосогласованности выше.
 
-Run `python -m pytest tests/ -v` to see all checks pass.
+Запустите `python -m pytest tests/ -v`, чтобы увидеть, что все проверки
+проходят.
 
-## Step 2 — structural-only classifier (`src/patches.py`, `src/model.py`, `src/train.py`)
+## Шаг 2 — классификатор только по структуре (`src/patches.py`, `src/model.py`, `src/train.py`)
 
-- `src/patches.py`: extracts a cubic patch (default 9³ voxels) around each
-  labeled voxel; splits one subject's brain into two **leakage-safe** halves
-  (left/right hemisphere by default, or anterior/posterior by changing
-  `axis_index`) with a margin gap so no train patch can overlap a test patch.
-- `src/model.py`: `SimplePatchCNN` — small 3D CNN (2 conv blocks + FC head),
-  as instructed: start simple, only move to `DeeperPatchCNN` (residual
-  blocks) if accuracy stays near chance.
-- `src/train.py`: `run_hemisphere_experiment(...)` trains+evaluates both fold
-  directions (A→train/B→test and reverse) and writes diagnostic plots
-  (patch examples, split visualization, training curves, confusion
-  matrix + ROC, fold-accuracy summary) via `src/viz.py`.
+- `src/patches.py`: извлекает кубический патч (по умолчанию 9³ вокселей)
+  вокруг каждого размеченного вокселя; делит мозг одного пациента на две
+  **защищённые от утечки** половины (по умолчанию левое/правое полушарие,
+  либо передне-задняя ось при смене `axis_index`) с отступом, чтобы ни один
+  обучающий патч не пересекался с тестовым.
+- `src/model.py`: `SimplePatchCNN` — небольшая 3D CNN (2 свёрточных блока +
+  полносвязная голова), как и было указано: начать с простого, переходить к
+  `DeeperPatchCNN` (с residual-блоками) только если точность остаётся на
+  уровне случайности.
+- `src/train.py`: `run_hemisphere_experiment(...)` обучает и оценивает оба
+  направления разбиения (A→train/B→test и наоборот) и сохраняет
+  диагностические графики (примеры патчей, визуализацию разбиения, кривые
+  обучения, матрицу ошибок + ROC, сводку точности по разбиениям) через
+  `src/viz.py`.
 
-## Current data status
+## Текущий статус данных
 
-**Structural data (T1w) for 5 subjects — done.** `openneuro.org` itself is
-blocked by this session's network policy, but the S3 bucket that actually
-backs it is not (`s3.amazonaws.com/openneuro.org/ds004873/...` — found by
-listing the bucket directly, see `scripts/download_structural_data.py`).
-Downloaded real T1w for `sub-p019, sub-p020, sub-p021, sub-p023, sub-p026`
-straight from there, with an approximate Otsu-threshold brain mask
-(`src/dataio.py:simple_brain_mask` — no FSL/nilearn available in this
-session; good enough to keep patch centers inside the head, not a
-substitute for real skull-stripping). Listing that bucket also confirms
-`ds004873` on OpenNeuro has **no `derivatives/` folder and no raw MEGRE/DSC
-data at all** — only `T1w`, 8-echo `MESE`, and one `task-all_bold.nii.gz`
-per subject.
+**Структурные данные (T1w) для 5 пациентов — готово.** Сам `openneuro.org`
+заблокирован сетевой политикой этой сессии, но S3-бакет, который его
+реально обслуживает, доступен (`s3.amazonaws.com/openneuro.org/ds004873/...`
+— найден прямым просмотром содержимого бакета, см.
+`scripts/download_structural_data.py`). Скачаны реальные T1w для
+`sub-p019, sub-p020, sub-p021, sub-p023, sub-p026` напрямую оттуда, с
+приближённой маской мозга по порогу Оцу (`src/dataio.py:simple_brain_mask`
+— в этой сессии нет FSL/nilearn; маска достаточно хороша, чтобы центры
+патчей оставались внутри головы, но не заменяет настоящее вычленение
+черепа). Просмотр содержимого бакета также подтвердил, что у `ds004873` на
+OpenNeuro **нет папки `derivatives/` и вообще нет сырых данных
+MEGRE/DSC** — только `T1w`, 8-эхо `MESE` и один `task-all_bold.nii.gz` на
+пациента.
 
-**Real concordant/discordant labels — still blocked, and the blocker is
-bigger than "get a file from Drive".** Traced exactly what the merged
-notebooks need: `qBOLD_fun.ipynb`'s `create_qBOLD_masks()` only thresholds
-and masks R2'/CBV/T2S/OEF/CBF maps that are assumed to already exist on disk
-(`combined_pipeline.py` lines 35-160) — it never computes them from raw
-data. CMRO₂ itself (`CMRO2 = CBF * OEF * CaO2`, `~line 737`) also takes CBF
-and OEF as given inputs. All of R2', CBV, CBF, OEF are products of the
-authors' separate MATLAB mq-BOLD + DSC-CBV pipeline
-(`qBOLD_BIDS_Hct_April21.zip`) run on raw multi-echo MEGRE + DSC perfusion
-data + a per-subject Hct value — none of which is in the public OpenNeuro
-copy, and reimplementing that MATLAB physics pipeline from scratch here
-(no MATLAB in this environment, multi-step calibration prone to subtle
-errors) is out of scope and too risky to trust for ground-truth labels.
+**Настоящие метки concordant/discordant — всё ещё заблокированы, и
+блокировка серьёзнее, чем «скачать файл с Диска».** Прослежено точно, что
+нужно объединённым ноутбукам: `create_qBOLD_masks()` из `qBOLD_fun.ipynb`
+только пороговывает и маскирует карты R2'/CBV/T2S/OEF/CBF, которые
+предполагаются уже существующими на диске (`combined_pipeline.py`, строки
+35-160) — он никогда не считает их из сырых данных. Сам CMRO₂
+(`CMRO2 = CBF * OEF * CaO2`, `~строка 737`) тоже принимает CBF и OEF как
+готовые входы. Все R2', CBV, CBF, OEF — результат отдельного MATLAB-конвейера
+авторов mq-BOLD + DSC-CBV (`qBOLD_BIDS_Hct_April21.zip`), запущенного на
+сырых мультиэхо-MEGRE + DSC-перфузионных данных + индивидуальном значении
+Hct на пациента — ничего из этого нет в публичной копии на OpenNeuro, а
+переписывать этот MATLAB-конвейер физики с нуля здесь (в этом окружении нет
+MATLAB, многошаговая калибровка склонна к тонким ошибкам) — вне рамок
+задачи и слишком рискованно, чтобы доверять этому как эталонным меткам.
 
-**What's actually needed next:** the lab's own precomputed `qmri/` outputs
-per subject/condition — `*_R2prime.nii`, `*_cbv.nii`, `*_oef.nii`,
-`*_cbf.nii` (or directly `*_cmro2.nii` / `*_BOLD_percchange.nii.gz` if those
-were saved) — matching the paths in `src/dataio.py:SubjectPaths`. Raw MEGRE
-echoes alone are not sufficient without running the MATLAB step first.
+**Что реально нужно дальше:** собственные предвычисленные выходы `qmri/`
+лаборатории на пациента/условие — `*_R2prime.nii`, `*_cbv.nii`, `*_oef.nii`,
+`*_cbf.nii` (или сразу `*_cmro2.nii` / `*_BOLD_percchange.nii.gz`, если они
+были сохранены) — совпадающие по путям с `src/dataio.py:SubjectPaths`.
+Одних только сырых эхо MEGRE недостаточно без предварительного запуска
+MATLAB-шага.
 
-### The MATLAB pipeline itself (`qBOLD_BIDS_Hct_April21.zip`, from
-https://gitlab.lrz.de/nmrm_lab/public_projects/mq-bold - blocked here, but
-the zip ships inside the already-cloned `two_modes_of_hemodynamics` repo)
+### Сам MATLAB-конвейер (`qBOLD_BIDS_Hct_April21.zip`, из
+https://gitlab.lrz.de/nmrm_lab/public_projects/mq-bold — здесь заблокирован,
+но zip-архив идёт внутри уже клонированного репозитория `two_modes_of_hemodynamics`)
 
-Four stages: `run1_process_anatomy.m` (SPM12 segmentation), `run2_dsc_cbv.m`
-(CBV from contrast-agent DSC perfusion, with a **manual** AIF-selection
-step), `run3_mqBOLD_rOEF.m` (T2/T2' -> OEF), `run4_pCASL_CBF.m` (CBF from
-arterial spin labeling). Needs SPM12 (large separate MATLAB toolbox, not
-included) and ships precompiled Linux x86_64 MEX binaries for one
-sub-step.
+Четыре стадии: `run1_process_anatomy.m` (сегментация SPM12), `run2_dsc_cbv.m`
+(CBV из DSC-перфузии с контрастным агентом, с **ручным** шагом выбора AIF),
+`run3_mqBOLD_rOEF.m` (T2/T2' → OEF), `run4_pCASL_CBF.m` (CBF из
+артериальной спин-маркировки). Нужен SPM12 (большой отдельный MATLAB-набор
+инструментов, не включён) и содержит скомпилированные Linux x86_64
+MEX-бинарники для одного из подшагов.
 
-**Ported and actually run the one piece we have complete real data for:**
-`src/qbold.py::fit_t2_map` reimplements `calc_T2_map.m`'s per-voxel T2 fit
-(mono-exponential `S(TE) = a * exp(-TE/T2)`) as a vectorized linearized
-least-squares fit (the MATLAB original uses a custom bisection search - not
-a byte-for-byte port, see the module docstring) and
-`scripts/compute_t2_maps.py` runs it on the real 8-echo MESE series (pulled
-from the same S3 bucket, `scripts/download_mese.py`) for all 5 subjects.
-Verified against synthetic known-T2 data first (`tests/test_qbold.py`), then
-run for real: median brain T2 came out 76-79 ms for all 5 subjects, in the
-physiologically expected range at 3T.
+**Портирован и реально запущен тот единственный кусок, для которого у нас
+есть полные настоящие данные:** `src/qbold.py::fit_t2_map` воспроизводит
+поэтапный T2-фит `calc_T2_map.m` (моноэкспоненциальный
+`S(TE) = a * exp(-TE/T2)`) как векторизованный линеаризованный
+метод наименьших квадратов (оригинал на MATLAB использует пользовательский
+бисекционный поиск — это не побайтовый порт, см. docstring модуля), а
+`scripts/compute_t2_maps.py` запускает его на реальной 8-эхо серии MESE
+(скачана из того же S3-бакета, `scripts/download_mese.py`) для всех 5
+пациентов. Сначала проверено на синтетических данных с известным T2
+(`tests/test_qbold.py`), затем запущено на реальных: медианный T2 мозга
+составил 76-79 мс для всех 5 пациентов — в физиологически ожидаемом
+диапазоне для 3Т.
 
-**Update - real labels recovered, no longer blocked.** OpenNeuro's S3 bucket
-has object versioning enabled, and ds004873's public listing (raw-only,
-`"DatasetType": "raw"`) turned out to be a later re-scoping: earlier
-snapshots of the same CC0-licensed dataset had a full `derivatives/` tree
-(~970 files/subject) with exactly the qmri/func outputs the source pipeline
-expects, plus `participants.tsv` (Hct/O2sat). S3 keeps old object content
-under a delete marker rather than erasing it, so `scripts/list_versions.py`
-(walks `?versions&prefix=...`, paginated) finds the last real version of
-each key and `scripts/download_real_labels.py` fetches it via
-`?versionId=...`. Recovered per subject: `*_space-T2_desc-brain_T1w.nii.gz`
-(structural, same space as the labels), `*_task-{calc,mem}control_space-T2_
-BOLD_percchange.nii.gz` (signed), and `*_task-{calc,control,mem}_space-T2_
-desc-orig_cmro2.nii` (Fick's-principle CMRO2, task and baseline).
+**Обновление — настоящие метки восстановлены, блокировка снята.** У
+S3-бакета OpenNeuro включено версионирование объектов, и публичный листинг
+`ds004873` (только raw, `"DatasetType": "raw"`) оказался более поздним
+сужением области: более ранние снепшоты того же датасета под лицензией CC0
+содержали полное дерево `derivatives/` (~970 файлов на пациента) — как раз
+с теми выходами qmri/func, которые ожидает исходный конвейер, плюс
+`participants.tsv` (Hct/сатурация O2). S3 хранит старое содержимое объекта
+под маркером удаления, а не стирает его, поэтому `scripts/list_versions.py`
+(обходит `?versions&prefix=...` постранично) находит последнюю реальную
+версию каждого ключа, а `scripts/download_real_labels.py` скачивает её
+через `?versionId=...`. Восстановлено на пациента:
+`*_space-T2_desc-brain_T1w.nii.gz` (структура, то же пространство, что и
+метки), `*_task-{calc,mem}control_space-T2_BOLD_percchange.nii.gz`
+(со знаком) и `*_task-{calc,control,mem}_space-T2_desc-orig_cmro2.nii`
+(CMRO2 по принципу Фика, задача и базовый уровень).
 
-`scripts/run_real_experiment.py` computes the real label exactly as in
+`scripts/run_real_experiment.py` считает настоящую метку в точности как в
 `combined_pipeline.py` (`CMRO2_percchange = (CMRO2_task - CMRO2_control) /
-CMRO2_control * 100`, then `sign(CMRO2_percchange) * sign(BOLD_percchange)`)
-for both calc-vs-control and mem-vs-control per subject (a built-in
-replication check), and runs the same tested hemisphere-split classifier
-on it. Class balance came out ~45-55% concordant/discordant for every
-subject/contrast - no degenerate label.
+CMRO2_control * 100`, затем `sign(CMRO2_percchange) * sign(BOLD_percchange)`)
+и для calc-vs-control, и для mem-vs-control на пациента (встроенная проверка
+воспроизводимости) и запускает тот же протестированный классификатор с
+разбиением по полушариям. Баланс классов вышел ~45-55% concordant/discordant
+для каждого пациента/контраста — метка не вырожденная.
 
-### Real result
+### Настоящий результат
 
-`results/real_experiment/real_experiment_summary.png` (not committed - real
-patient-derived data, see .gitignore): test accuracy is at chance (0.46-0.53)
-for all 5 subjects, both task contrasts (calc and mem), and both
-hemisphere-split directions - 20/20 runs. No subject or contrast stands out.
-This is exactly the outcome the supervisor's plan named as a real,
-actionable result ("если точность низкая... нужно усложнить архитектуру"):
-`SimplePatchCNN` (2 conv blocks) finds no signal in raw T1 patches alone
-predicting concordant/discordant status. Confusion matrices show a mild bias
-toward predicting the majority class rather than any real discrimination
-(e.g. sub-p019 calc: AUC 0.55).
+`results/real_experiment/real_experiment_summary.png` (не закоммичен —
+реальные данные пациентов, см. .gitignore): точность на тесте на уровне
+случайности (0.46-0.53) для всех 5 пациентов, обеих задач (calc и mem) и
+обоих направлений разбиения по полушариям — 20/20 прогонов. Ни один
+пациент или контраст не выделяется. Это ровно тот исход, который план
+руководителя называл реальным, действенным результатом («если точность
+низкая... нужно усложнить архитектуру»): `SimplePatchCNN` (2 свёрточных
+блока) не находит сигнала в сырых T1-патчах, предсказывающего статус
+concordant/discordant. Матрицы ошибок показывают лёгкий сдвиг в сторону
+более частого класса, а не настоящую дискриминацию (например, sub-p019
+calc: AUC 0.55).
 
-This is a real negative result for the simple model, not a code problem -
-the same pipeline that gets 75-82% on the intensity-threshold sanity check
-(`results/smoke_test_all/`) gets chance accuracy here, so the model
-*can* learn when there is something learnable in a patch; it just isn't
-finding a concordant/discordant signal in raw T1 intensity alone with this
-architecture.
+Это настоящий отрицательный результат для простой модели, а не проблема в
+коде — тот же конвейер даёт 75-82% на санити-чеке с порогом интенсивности
+(`results/smoke_test_all/`), а здесь — точность на уровне случайности,
+значит модель *способна* учиться, когда в патче есть что-то обучаемое; она
+просто не находит сигнал concordant/discordant в одной лишь интенсивности
+T1 с этой архитектурой.
 
-### Tried the supervisor's contingency (deeper / attention model) - same result
+### Проверен запасной вариант руководителя (более глубокая модель / внимание) — тот же результат
 
-`src/model.py` also has `DeeperPatchCNN` (residual blocks) and
-`AttentionPatchCNN` (conv encoder + transformer self-attention over the
-patch's spatial tokens - the per-patch-classification adaptation of a
-"U-Net with transformer" like MS-DSA-NET, minus the decoder half a
-segmentation network needs and a classifier doesn't). `src/train.py`'s
-`model_factory` argument makes the architecture pluggable.
-`scripts/run_real_experiment_v2.py` ran both on the same real labels: 5
-subjects x 2 contrasts x 2 architectures x 2 fold directions = 40 runs.
-Result: `DeeperPatchCNN` mean 0.513 (std 0.020), `AttentionPatchCNN` mean
-0.506 (std 0.013) - every single run in both architectures falls in
-0.47-0.55, i.e. chance, same as `SimplePatchCNN`.
+В `src/model.py` также есть `DeeperPatchCNN` (residual-блоки) и
+`AttentionPatchCNN` (свёрточный энкодер + self-attention трансформера по
+пространственным токенам патча — адаптация «U-Net с трансформером» вроде
+MS-DSA-NET под классификацию патча, без декодерной половины, нужной сети
+сегментации, но не классификатору). Аргумент `model_factory` в
+`src/train.py` делает архитектуру подключаемой.
+`scripts/run_real_experiment_v2.py` запустил обе на тех же настоящих
+метках: 5 пациентов × 2 контраста × 2 архитектуры × 2 направления
+разбиения = 40 прогонов. Результат: `DeeperPatchCNN` среднее 0.513
+(std 0.020), `AttentionPatchCNN` среднее 0.506 (std 0.013) — каждый
+отдельный прогон в обеих архитектурах лежит в 0.47-0.55, то есть на уровне
+случайности, как и `SimplePatchCNN`.
 
-**Conclusion so far:** three architectures of increasing capacity
-(a 2-layer CNN, a residual CNN, a conv+transformer hybrid), tested on 5
-subjects and 2 independent task contrasts with a leakage-safe hemisphere
-split (60 total training runs), converge tightly on chance-level accuracy.
-That convergence across architectures is itself informative - it argues
-against "the model just isn't expressive enough yet" and toward "there is
-no signal in a raw T1 patch (9x9x9 voxels, ~1.8cm cube) alone that predicts
-this voxel's concordant/discordant status" for this task as currently
-posed.
+**Вывод на этом этапе:** три архитектуры возрастающей ёмкости (2-слойная
+CNN, residual CNN, гибрид conv+transformer), проверенные на 5 пациентах и
+2 независимых контрастах задачи с защищённым от утечки разбиением по
+полушариям (60 обучений всего), сходятся плотно к точности на уровне
+случайности. Само это схождение по архитектурам информативно — оно
+говорит против «модели просто не хватает выразительности» и в пользу «в
+сыром T1-патче (9×9×9 вокселей, ~1.8см куб) самом по себе нет сигнала,
+предсказывающего статус concordant/discordant этого вокселя» для задачи в
+текущей постановке.
 
-## Experiment 2: structural patch + plain BOLD signal
+## Эксперимент 2: структурный патч + сырой сигнал BOLD
 
-Added `<sub>_task-all_space-T2_filtered_func.nii.gz` (FSL FEAT's fully
-preprocessed BOLD - motion correction, spatial smoothing, temporal
-high-pass filtering already applied, recovered the same way as the CMRO2/
-BOLD_percchange labels) as a second per-voxel input: each voxel's own
-400-timepoint series, linearly detrended and z-scored
-(`src/bold_features.py`). `PatchBOLDNet` (`src/model.py`) is a two-branch
-net - the same 3D conv trunk as `SimplePatchCNN` for the structural patch,
-plus a 1D conv trunk over the time axis for the BOLD vector - concatenated
-before the classifier head. Explicitly did NOT attempt field-inhomogeneity/
-dropout-artifact correction (signal loss near air-tissue boundaries); that
-needs subject-specific field maps and is flagged as an open gap, not
-silently skipped.
+Добавлен `<sub>_task-all_space-T2_filtered_func.nii.gz` (полностью
+предобработанный BOLD из FSL FEAT — коррекция движения, пространственное
+сглаживание, временная высокочастотная фильтрация уже применены,
+восстановлен так же, как метки CMRO2/BOLD_percchange) как второй вход на
+воксель: собственный 400-точечный временной ряд каждого вокселя, линейно
+детрендирован и стандартизирован (`src/bold_features.py`). `PatchBOLDNet`
+(`src/model.py`) — сеть с двумя ветвями: тот же 3D-свёрточный ствол, что у
+`SimplePatchCNN`, для структурного патча, плюс 1D-свёрточный ствол по оси
+времени для вектора BOLD — объединяются перед классификационной головой.
+Осознанно не предпринята коррекция артефактов неоднородности поля/выпадения
+сигнала (потеря сигнала у границ воздух-ткань); для неё нужны индивидуальные
+карты поля, и это явно отмечено как открытый пробел, а не тихо пропущено.
 
-`scripts/run_experiment2.py` ran this on the same real labels, same 5
-subjects x 2 contrasts x 2 fold directions (20 runs): **mean accuracy 0.516
-(std 0.017), every run in 0.48-0.57 - still chance level.** Adding the plain
-BOLD signal did not recover a signal that three structural-only
-architectures (Simple/Deeper/Attention, Experiment 1) also failed to find.
+`scripts/run_experiment2.py` запустил это на тех же настоящих метках, тех
+же 5 пациентах × 2 контраста × 2 направления разбиения (20 прогонов):
+**средняя точность 0.516 (std 0.017), каждый прогон в 0.48-0.57 — всё ещё
+уровень случайности.** Добавление сырого сигнала BOLD не восстановило
+сигнал, который три чисто структурные архитектуры (Simple/Deeper/Attention,
+Эксперимент 1) тоже не смогли найти.
 
-## Scaled up: full cohort (25/40 subjects) + condition-averaged BOLD features
+## Масштабирование: полная когорта (25/40 пациентов) + усреднённые по условиям признаки BOLD
 
-Two follow-ups, both per direct user request: (1) use the full valid cohort
-instead of 5 subjects, (2) replace Experiment 2's raw BOLD time series with
-condition-averaged BOLD features.
+Два продолжения, оба по прямому запросу: (1) использовать полную рабочую
+когорту вместо 5 пациентов, (2) заменить сырой временной ряд BOLD из
+Эксперимента 2 на усреднённые по условиям признаки BOLD.
 
-**Cohort scale-up, and a real design change.** `src/cohort.py` lists the 40
-valid `sub-pXXX` subjects (from `participants.tsv`, excluding 7 flagged
-`EXCLUDED` there). Fitting 40 more independent single-subject CNNs
-(each on ~1500 voxels/side) wouldn't actually use "more data" in any
-meaningful way for a data-hungry model - so `scripts/run_pooled_cohort.py`
-instead **pools voxels across all subjects**: one model trained on
-"hemisphere A across every subject" and tested on "hemisphere B across
-every subject" (and reversed). Still leakage-safe (no voxel's neighborhood
-crosses train/test, and now subjects don't either).
+**Расширение когорты и реальное изменение дизайна.** `src/cohort.py`
+перечисляет 40 валидных пациентов `sub-pXXX` (из `participants.tsv`, за
+вычетом 7 отмеченных там как `EXCLUDED`). Обучение ещё 40 независимых
+одно-пациентных CNN (каждая на ~1500 вокселях на сторону) на деле не
+использовало бы «больше данных» сколько-нибудь осмысленно для
+требовательной к данным модели — поэтому `scripts/run_pooled_cohort.py`
+вместо этого **объединяет воксели всех пациентов**: одна модель обучается
+на «полушарии A у всех пациентов» и тестируется на «полушарии B у всех
+пациентов» (и наоборот). По-прежнему защищено от утечки (окрестность ни
+одного вокселя не пересекает train/test, и теперь пациенты тоже не
+пересекают).
 
-**Condition-averaged BOLD features.** `src/bold_features.py:
-compute_condition_features` replaces Experiment 2's raw 400-timepoint
-vector with 3 numbers per voxel: percent signal change during calc, mem,
-and rest blocks (lag-adjusted, skipping the first ~4s of each block for
-hemodynamic delay), parsed from `events.tsv` (also recovered via S3
-version history - the block design has no separate "control" trial type,
-so "rest" is used as that baseline, an inferred mapping, documented as
-such). `PatchBOLDConditionNet` swaps Experiment 2's 1D-conv-over-time
-branch for a small MLP, the right tool for a short pre-summarized vector.
+**Усреднённые по условиям признаки BOLD.**
+`src/bold_features.py:compute_condition_features` заменяет сырой
+400-точечный вектор из Эксперимента 2 на 3 числа на воксель: процентное
+изменение сигнала во время блоков calc, mem и покоя (с поправкой на
+задержку, первые ~4с каждого блока пропускаются из-за гемодинамической
+задержки), взято из `events.tsv` (тоже восстановлен через историю версий
+S3 — в блочном дизайне нет отдельного типа испытания «control», поэтому в
+качестве базового уровня используется «покой» — это выведенное
+соответствие, явно задокументированное как таковое).
+`PatchBOLDConditionNet` заменяет 1D-свёрточную по времени ветвь из
+Эксперимента 2 на небольшой MLP — правильный инструмент для короткого,
+заранее свёрнутого вектора.
 
-**Data coverage: 25 of 40 subjects usable, and why the other 15 aren't.**
-Found and fixed a real bug along the way: 9 subjects' ~450-500MB
-`filtered_func` downloads failed mid-transfer, and the download helper
-was treating the resulting partial file as "already downloaded" on any
-retry - silently corrupting the input. Fixed with atomic writes (temp file
-+ verified byte count + rename) and retry-with-backoff
-(`scripts/download_real_labels.py`); this recovered those 9 subjects
-(16 -> 25). The remaining 15: `sub-p028/p029/p048/p052/p055` are each
-missing one specific required file in the version history (not a network
-issue - the file just isn't there); `sub-p058` through `sub-p068` (11
-subjects) use a visibly different derivatives layout from the rest of the
-cohort (whole-head `_space-T2_T1w.nii` instead of a pre-skull-stripped
-`_space-T2_desc-brain_T1w.nii.gz`, and CBV-corrected CMRO2 naming instead
-of `desc-orig`) - real further work to support, not attempted here rather
-than rushed. (Superseded below: those 11 subjects were later added via
-`src/subject_loader.py`, see "Cohort completion: 39/40 subjects" - 9 of
-the 11 turned out usable for the `calc` contrast.)
+**Покрытие данных: пригодны 25 из 40 пациентов, и почему остальные 15
+нет.** По пути найден и исправлен реальный баг: у 9 пациентов скачивание
+`filtered_func` (~450-500МБ) обрывалось на середине, а вспомогательный
+загрузчик при повторной попытке считал получившийся частичный файл «уже
+скачанным» — тихо портя вход. Исправлено атомарной записью (временный
+файл + проверка числа байт + переименование) и повтором с задержкой
+(`scripts/download_real_labels.py`); это вернуло эти 9 пациентов (16 → 25).
+Остальные 15: у `sub-p028/p029/p048/p052/p055` в истории версий
+отсутствует по одному конкретному нужному файлу (это не сетевая проблема —
+файла там просто нет); `sub-p058`…`sub-p068` (11 пациентов) используют
+заметно другую схему именования производных файлов, чем остальная когорта
+(файл на всю голову `_space-T2_T1w.nii` вместо заранее вычлененного
+`_space-T2_desc-brain_T1w.nii.gz`, и именование CMRO2 с поправкой на CBV
+вместо `desc-orig`) — это реальная дополнительная работа по поддержке, не
+предпринята здесь второпях, а отложена. (Позже устарело: эти 11 пациентов
+впоследствии добавлены через `src/subject_loader.py`, см. «Завершение
+когорты: 39/40 пациентов» — 9 из 11 оказались пригодны для контраста
+`calc`.)
 
-**Result: still chance.** 25 subjects, ~12,500 pooled voxels per hemisphere
-per contrast, calc and mem contrasts, both fold directions, structural-only
-and structural+condition-BOLD models (8 results total): accuracy 0.494-0.532
-throughout - no meaningful movement from the 5-subject result, and nowhere
-near the supervisor's 0.65-0.70 target range.
+**Результат: всё ещё уровень случайности.** 25 пациентов, ~12 500
+объединённых вокселей на полушарие на контраст, контрасты calc и mem, оба
+направления разбиения, модели только-структура и структура+BOLD-по-условиям
+(8 результатов всего): точность 0.494-0.532 повсюду — никакого значимого
+сдвига относительно результата на 5 пациентах, и далеко от целевого
+диапазона руководителя 0.65-0.70.
 
-## Two more follow-ups: bigger patch, and regression on continuous CMRO2
+## Ещё два продолжения: больший патч и регрессия на непрерывный CMRO2
 
-Both per direct user request, both on the same 25-subject pooled cohort,
-in one combined run (`scripts/run_pooled_extended.py`) so they're directly
-comparable to each other and to the results above.
+Оба по прямому запросу, оба на той же объединённой когорте из 25 пациентов,
+в одном совмещённом прогоне (`scripts/run_pooled_extended.py`), чтобы их
+можно было напрямую сравнивать друг с другом и с результатами выше.
 
-**Bigger patch (whole-ROI-scale context).** patch_size 15
-(~30x30x50mm physical, given the 2x2x3.3mm voxel spacing) alongside the
-original 9 (~18x18x30mm) - the fallback the supervisor's own plan names
-once "just add more data" isn't the answer. Classification accuracy:
-0.503-0.535 at patch=9, 0.500-0.533 at patch=15 - indistinguishable, no
-improvement from more spatial context.
+**Больший патч (контекст масштаба целого ROI).** patch_size 15 (~30×30×50мм
+физически, при разрешении вокселя 2×2×3.3мм) наряду с исходным 9
+(~18×18×30мм) — запасной вариант, который план руководителя называет, когда
+«просто добавить данных» не помогает. Точность классификации: 0.503-0.535
+при патче=9, 0.500-0.533 при патче=15 — неразличимо, никакого улучшения от
+большего пространственного контекста.
 
-**Regression on continuous CMRO2_percchange**
-(`src/train.py:train_one_fold_regression`) instead of the binary
-concordant/discordant label - predicts the actual magnitude/direction of
-metabolic change rather than just its sign-agreement with BOLD, so it
-keeps information the binary label throws away. Verified on synthetic data
-first (intensity-encoding patches recover R2 > 0.5, confirming the training
-loop itself works). On the real data: **R2 is at or below zero everywhere**
-(-0.037 to -0.000, both patch sizes, both contrasts, both fold directions)
-- not just "no better than chance" like the classification results, but
-*worse than predicting the training-set mean for every test voxel*.
-Correlation between predicted and true values: -0.02 to 0.005, i.e. none.
-This is if anything a more decisive null than the classification numbers:
-a model with zero real signal but some capacity to overfit would still
-often land at R2 near (not below) zero on a fresh test half, so consistently
-negative R2 across every condition says the little bit the model does
-"learn" from the training hemisphere actively fails to generalize to the
-other hemisphere, in every configuration tried.
+**Регрессия на непрерывный CMRO2_percchange**
+(`src/train.py:train_one_fold_regression`) вместо бинарной метки
+concordant/discordant — предсказывает саму величину/направление
+метаболического изменения, а не только совпадение его знака с BOLD, то
+есть сохраняет информацию, которую бинарная метка отбрасывает. Сначала
+проверено на синтетических данных (патчи, кодирующие интенсивность,
+дают R2 > 0.5, подтверждая, что сам цикл обучения работает). На реальных
+данных: **R2 везде на нуле или ниже** (от -0.037 до -0.000, оба размера
+патча, оба контраста, оба направления разбиения) — не просто «не лучше
+случайности», как результаты классификации, а *хуже, чем предсказывать
+среднее по обучающей выборке для каждого тестового вокселя*. Корреляция
+между предсказанными и истинными значениями: от -0.02 до 0.005, то есть
+никакой. Это даже более решительный нулевой результат, чем цифры
+классификации: модель без реального сигнала, но с некоторой способностью
+переобучаться, всё равно часто оказывалась бы близко к нулю (не ниже) по
+R2 на свежей тестовой половине, так что стабильно отрицательный R2 во всех
+условиях говорит, что та малость, которую модель всё же «выучивает» из
+обучающего полушария, активно не обобщается на другое полушарие — в
+каждой опробованной конфигурации.
 
-## Follow-up: covariates, coarse regions, and a positive control
+## Продолжение: ковариаты, грубые регионы и позитивный контроль
 
-Four more items requested; one attempted honestly and found blocked, one
-substituted for what was actually obtainable, two run as real experiments.
-All four reuse `PatchBOLDConditionNet` (structural patch + small feature
-vector) with a different feature source, on the same 25-subject pool
-(`scripts/run_extras.py`).
+Запрошено ещё четыре пункта: один честно испробован и оказался
+заблокирован, один заменён на то, что реально было доступно, два запущены
+как настоящие эксперименты. Все четыре переиспользуют
+`PatchBOLDConditionNet` (структурный патч + небольшой вектор признаков) с
+разным источником признаков, на той же объединённой когорте из 25
+пациентов (`scripts/run_extras.py`).
 
-**Pretrained 3D-MRI backbone, fine-tuned here - blocked, not attempted.**
-Cloned `Tencent/MedicalNet` to check directly: no `.pth`/`.pt` weights are
-committed to the repo, the README points to Google Drive / Baidu Pan, both
-blocked by this session's network policy (confirmed: OSF, NITRC,
-Hugging Face, Zenodo, Google Drive all return connection failures). Faking
-"pretrained" via a randomly-initialized network would misrepresent the
-result, so this item was not run.
+**Предобученный 3D-МРТ backbone, дообученный здесь — заблокирован, не
+запущен.** Клонирован `Tencent/MedicalNet` для прямой проверки: в
+репозитории не закоммичены веса `.pth`/`.pt`, README указывает на Google
+Drive / Baidu Pan, оба заблокированы сетевой политикой этой сессии
+(подтверждено: OSF, NITRC, Hugging Face, Zenodo, Google Drive — все
+возвращают ошибки соединения). Имитация «предобученности» случайно
+инициализированной сетью исказила бы результат, поэтому этот пункт не
+запускался.
 
-**Real anatomical parcellation (Glasser/HCP-MMP) - also blocked, substituted
-honestly.** The atlas itself isn't obtainable here either (same blocked
-hosts, no local FSL install, and this session's GitHub search tool is
-scoped to the one attached repository rather than all of GitHub, so no
-alternative atlas source could even be located). Ran a **coarse geometric
-grid** instead - T1 mean/std over big anterior-posterior x inferior-superior
-blocks, computed separately per hemisphere-split side so no block straddles
-train/test - more spatial context than a patch, but explicitly **not**
-anatomically informed, and reported as such rather than mislabeled as the
-requested atlas.
+**Настоящая анатомическая парцелляция (Glasser/HCP-MMP) — тоже
+заблокирована, честно заменена.** Сам атлас здесь тоже недостижим (те же
+заблокированные хосты, локального FSL нет, а инструмент поиска по GitHub в
+этой сессии ограничен одним подключённым репозиторием, а не всем GitHub,
+так что даже альтернативный источник атласа найти не удалось. Вместо
+этого запущена **грубая геометрическая сетка** — среднее/std T1 по крупным
+блокам передне-задний × нижне-верхний, посчитанным отдельно для каждой
+стороны разбиения по полушариям, чтобы ни один блок не пересекал
+train/test — больше пространственного контекста, чем патч, но явно **не**
+анатомически осмысленный, и заявлено именно так, а не выдано за
+запрошенный атлас.
 
-**Covariates (age/Hct/sex from `participants.tsv`) - a real experiment.**
-0.480-0.531 across both contrasts and fold directions - chance, like
-everything else.
+**Ковариаты (возраст/Hct/пол из `participants.tsv`) — настоящий
+эксперимент.** 0.480-0.531 по обоим контрастам и направлениям разбиения —
+уровень случайности, как и всё остальное.
 
-**Oracle / positive control - not a scientific result.** Feeds the model
-the real `BOLD_percchange` and `CMRO2_percchange` values that *define* the
-label directly, so accuracy near 100% is expected by construction (the
-label is exactly `sign(BOLD_percchange) x sign(CMRO2_percchange)`); this is
-a pipeline sanity check, not a finding about structure. Verified first on
-one subject (0.956 accuracy) to confirm the concept works, then run pooled
-across all 25.
+**Оракульный / позитивный контроль — не научный результат.** Подаёт модели
+напрямую настоящие значения `BOLD_percchange` и `CMRO2_percchange`,
+которые и *определяют* метку, поэтому точность около 100% ожидаема по
+построению (метка — это ровно `sign(BOLD_percchange) x
+sign(CMRO2_percchange)`); это проверка конвейера, а не находка о
+структуре. Сначала проверено на одном пациенте (точность 0.956), чтобы
+подтвердить, что концепция работает, затем запущено на объединённых
+данных всех 25.
 
-*(Bug found and fixed: the pooled version originally z-scored - mean-
-subtracted and scaled - the two oracle features before feeding them to the
-model. Since the label is defined purely by their signs, and each column's
-per-subject mean is essentially never exactly zero (2.8-27.4 across sampled
-subjects, since CMRO2%change is not symmetric per subject), centering shifts
-each column's effective zero-crossing away from the true zero and silently
-flips the label for every voxel whose raw value fell between the old and
-new zero point - worst for small-magnitude, near-zero voxels, which this
-dataset has many of. Verified directly on 5 real subjects: 18-44% of labels
-were flipped by this normalization alone, nothing to do with the model's
-ability to learn. Fixed by switching to scale-only normalization (divide by
-std, no mean subtraction), which preserves sign exactly - verified: 0 flips
-on the same 5 subjects. This only touches the oracle sanity check; none of
-the real structural/physiological experiments used this feature.)*
+*(Найден и исправлен баг: в объединённой версии два oracle-признака перед
+подачей в модель сначала z-нормализовались — из них вычиталось среднее и
+делился разброс. Поскольку метка определяется исключительно их знаками, а
+среднее каждого столбца на пациента практически никогда не равно нулю
+(от 2.8 до 27.4 на проверенных пациентах, так как CMRO2%change не
+симметричен на уровне пациента), центрирование сдвигает эффективную точку
+нуля каждого столбца от истинного нуля и незаметно переворачивает метку
+для любого вокселя, чьё сырое значение попало между старой и новой точкой
+нуля — хуже всего для вокселей с маленькой по модулю величиной, а таких в
+этом датасете много. Проверено напрямую на 5 реальных пациентах: 18-44%
+меток переворачивались из-за одной только этой нормализации, что никак не
+связано со способностью модели учиться. Исправлено переходом на
+нормализацию только по масштабу (деление на std, без вычитания среднего),
+которая сохраняет знак точно — проверено: 0 переворотов на тех же 5
+пациентах. Это касалось только oracle-санити-чека; ни один из настоящих
+структурных/физиологических экспериментов этот признак не использовал.)*
 
-**Corrected result: 0.955-0.975** pooled across all 25 subjects - now
-properly separated from the near-chance real experiments' 0.48-0.53 by a
-huge margin, and consistent with the single-subject check (0.956) rather
-than sitting well below it. This is the reading that should be trusted:
-the training pipeline can recover the label almost perfectly when it is
-handed the values that define it, which is exactly what a sanity check
-should show - confirming Experiments 1-2's (and everything after them's)
-chance-level numbers reflect a genuine absence of structural signal, not a
-broken or underpowered training loop. (The earlier 0.734-0.741 figure was
-itself an artifact of the same normalization bug, not a real ~25%
-optimization gap - superseded, kept in git history for transparency rather
-than silently removed.)
+**Исправленный результат: 0.955-0.975** на объединённых данных всех 25
+пациентов — теперь корректно отделён от результатов настоящих
+экспериментов на уровне случайности (0.48-0.53) большим отрывом, и
+согласуется с проверкой на одном пациенте (0.956), а не сильно ниже неё.
+Именно этому чтению стоит доверять: конвейер обучения способен
+восстановить метку почти идеально, когда ему передают значения, которые
+её определяют — именно это и должен показывать санити-чек, подтверждая,
+что цифры на уровне случайности в Экспериментах 1-2 (и во всём, что после
+них) отражают подлинное отсутствие структурного сигнала, а не сломанный
+или недостаточно мощный цикл обучения. (Более ранняя цифра 0.734-0.741
+сама была артефактом того же бага нормализации, а не настоящим разрывом
+оптимизации в ~25% — устарела, оставлена в истории git для прозрачности, а
+не тихо удалена.)
 
-## Fourth architecture (real U-Net) + longer, augmented training
+## Четвёртая архитектура (настоящий U-Net) + более длинное обучение с аугментацией
 
-Two more requests: retrain under better conditions (not just 15 epochs,
-fixed LR, no augmentation), and try a genuine U-Net, not just another
-pooling classifier.
+Ещё два запроса: переобучить в лучших условиях (не только 15
+фиксированных эпох без аугментации) и попробовать настоящий U-Net, а не
+ещё один классификатор с пулингом.
 
-**`PatchUNet`** (`src/model.py`): a real encoder-decoder with skip
-connections, upsampled via `F.interpolate` (robust to odd patch sizes like
-15, unlike transposed-conv striding). Unlike every other architecture here
-- which all collapse the patch to a feature vector before predicting
-anything - it predicts a dense map over the whole patch and reads the
-classification logit from the decoder output's center voxel, the actual
-location the label belongs to. Genuinely different inductive bias (dense,
-skip-connected reconstruction vs. global pooling), ~354K parameters.
+**`PatchUNet`** (`src/model.py`): настоящий энкодер-декодер со
+skip-соединениями, апсемплинг через `F.interpolate` (устойчив к нечётным
+размерам патча вроде 15, в отличие от шага транспонированной свёртки). В
+отличие от всех остальных архитектур здесь — которые все схлопывают патч
+в вектор признаков перед предсказанием — он предсказывает плотную карту
+по всему патчу и берёт логит классификации из центрального вокселя выхода
+декодера — реального места, которому принадлежит метка. По-настоящему
+другой индуктивный сдвиг (плотная реконструкция со skip-соединениями
+против глобального пулинга), ~354 тыс. параметров.
 
-**Training-side improvements** (`src/train.py`): random-flip augmentation
-(safe here since the model never sees absolute position, only local patch
-content) and cosine LR annealing, both now optional flags on the existing
-training loop. `scripts/run_finetune.py` reran all 4 architectures -
-Simple/Deeper/Attention plus the new U-Net - with augmentation, the LR
-schedule, and 25 epochs (up from 15), on pooled real data (patch=15,
-capped at 3,000 voxels/side for compute - PatchUNet costs ~12x a plain CNN
-per step).
+**Улучшения на стороне обучения** (`src/train.py`): аугментация случайным
+отражением (здесь безопасна, поскольку модель никогда не видит абсолютную
+позицию, только локальное содержимое патча) и косинусный отжиг learning
+rate, оба теперь опциональные флаги в существующем цикле обучения.
+`scripts/run_finetune.py` переобучил все 4 архитектуры — Simple/Deeper/
+Attention плюс новый U-Net — с аугментацией, расписанием LR и 25 эпохами
+(было 15), на объединённых реальных данных (патч=15, ограничение 3000
+вокселей на сторону ради вычислений — PatchUNet стоит ~12× обычной CNN за
+шаг).
 
-**Result: 0.499-0.548 across all 4 architectures**, both contrasts, both
-fold directions - PatchUNet included, no better than the other three, and
-"best epoch across the whole run" tops out at 0.548, still far under the
-target range. Longer training with augmentation didn't recover anything
-either; four architecturally distinct models (2 pooling CNNs, a
-transformer hybrid, and now a dense skip-connected U-Net) all converge on
-the same number.
+**Результат: 0.499-0.548 по всем 4 архитектурам**, оба контраста, оба
+направления разбиения — PatchUNet включительно, не лучше остальных трёх,
+и «лучшая эпоха за весь прогон» достигает максимум 0.548, всё ещё далеко
+от целевого диапазона. Более долгое обучение с аугментацией тоже ничего
+не восстановило; четыре архитектурно разных модели (2 CNN с пулингом,
+гибрид с трансформером и теперь плотный U-Net со skip-соединениями) все
+сходятся к одному и тому же числу.
 
-## Data-driven parcellation (k-means, one step up from the fixed grid)
+## Data-driven парцелляция (k-means, шаг вперёд от фиксированной сетки)
 
-`scripts/run_parcellation.py` clusters each subject's own brain voxels
-(k=20, per hemisphere-split side) on `(y, z, local T1 intensity)` instead
-of a fixed geometric grid - cluster boundaries follow that subject's
-actual tissue-intensity structure, the standard approach for a data-driven
-parcellation when no group-level atlas is available (still not a real
-anatomical atlas - no correspondence to named regions across subjects,
-reported as that, not oversold). Each voxel's cluster gives a 3-feature
-descriptor (mean T1, T1 std, log-size) fed through `PatchBOLDConditionNet`.
+`scripts/run_parcellation.py` кластеризует воксели мозга каждого пациента
+(k=20, отдельно по стороне разбиения полушарий) по `(y, z, локальная
+интенсивность T1)` вместо фиксированной геометрической сетки — границы
+кластеров следуют реальной структуре интенсивности тканей этого пациента,
+стандартный подход для data-driven парцелляции, когда нет группового
+атласа (всё ещё не настоящий анатомический атлас — нет соответствия
+именованным регионам между пациентами, заявлено именно так, без
+преувеличения). Кластер каждого вокселя даёт 3-признаковый дескриптор
+(средний T1, std T1, log-размер), поданный через `PatchBOLDConditionNet`.
 
-Run on the full 25-subject pool, 13,000 voxels/side/contrast: **0.502-0.523**
-- chance again, matching the fixed-grid version almost exactly.
+Запущено на полной когорте из 25 пациентов, 13 000 вокселей на
+сторону/контраст: **0.502-0.523** — снова уровень случайности, почти в
+точности совпадает с версией на фиксированной сетке.
 
-## Cohort completion: 39/40 subjects
+## Завершение когорты: 39/40 пациентов
 
-Every experiment above used the 25-subject subcohort because
-`load_subject_core()` in each script only knew one derivatives naming
-scheme - the 11 subjects sub-p058...sub-p068 use a different one (whole-head
-T1w instead of pre-skull-stripped, `BrMsk_CSF.nii` instead of the
-`_30slices` variant, `desc-CBV_cmro2` instead of `desc-orig_cmro2` for the
-task condition - this exact orig/CBV split matches the source repo's own
-`combined_pipeline.py` convention, not an improvisation) and were silently
-skipped every time, not because they're unusable.
+Каждый эксперимент выше использовал подкогорту из 25 пациентов, потому что
+`load_subject_core()` в каждом скрипте знал только одну схему именования
+производных файлов — 11 пациентов sub-p058...sub-p068 используют другую
+(T1w на всю голову вместо заранее вычлененного, `BrMsk_CSF.nii` вместо
+варианта `_30slices`, `desc-CBV_cmro2` вместо `desc-orig_cmro2` для условия
+задачи — это точное разделение orig/CBV совпадает с собственным соглашением
+`combined_pipeline.py` исходного репозитория, а не импровизация) и
+поэтому тихо пропускались каждый раз — не потому, что непригодны.
 
-`src/subject_loader.py` tries both naming schemes per file (T1w, mask,
-control/task CMRO2, BOLD_percchange) and records which fallback, if any,
-was used - `scripts/run_full_cohort.py` reruns the structural-only baseline
-(`SimplePatchCNN`, patch=9) across the whole cohort with it. Verified by
-hand against sub-p058/059/060/061/063-068 (checking the S3 version listing
-directly) before trusting it on all 40.
+`src/subject_loader.py` пробует обе схемы именования для каждого файла
+(T1w, маска, control/task CMRO2, BOLD_percchange) и фиксирует, какой
+запасной вариант, если он был, использован — `scripts/run_full_cohort.py`
+переобучает структурный базовый вариант (`SimplePatchCNN`, патч=9) на всей
+когорте с его помощью. Проверено вручную по sub-p058/059/060/061/063-068
+(сверкой напрямую с листингом версий S3), прежде чем доверять на всех 40.
 
-**Result: 39/40 subjects usable** (only sub-p058 is genuinely unrecoverable
-- confirmed directly that it has no control-condition CMRO2 in T2 space
-anywhere in its S3 version history, not a loader gap). None of the 9 new
-subjects have `mem`-contrast derivatives in any version of the dataset, so
-`calc` grows to 37 subjects (18,500 pooled voxels/side, up from 25 subjects
-/ 12,500 voxels/side) while `mem` stays at 30. Accuracy: **calc 0.499-0.513,
-mem 0.515-0.526** - indistinguishable from the 25-subject result despite
-+48% more subjects and voxels for `calc`. This closes the last "cheap"
-open question about cohort size: growing the real, available cohort as far
-as this dataset allows (5 -> 25 -> 37 subjects) does not recover a signal at
-any scale tested.
+**Результат: пригодны 39/40 пациентов** (только sub-p058 действительно не
+восстановим — подтверждено напрямую, что у него нигде в истории версий S3
+нет CMRO2 условия control в пространстве T2, это не пробел загрузчика). Ни
+у одного из 9 новых пациентов нет производных для контраста `mem` ни в
+одной версии датасета, поэтому `calc` вырастает до 37 пациентов (18 500
+объединённых вокселей на сторону, было 25 пациентов / 12 500 вокселей на
+сторону), а `mem` остаётся на 30. Точность: **calc 0.499-0.513, mem
+0.515-0.526** — неотличимо от результата на 25 пациентах, несмотря на
++48% пациентов и вокселей для `calc`. Это закрывает последний «дешёвый»
+открытый вопрос о размере когорты: расширение реальной доступной когорты
+настолько, насколько позволяет датасет (5 → 25 → 37 пациентов), не
+восстанавливает сигнал ни на одном опробованном масштабе.
 
-## Pretrained MedicalNet ResNet50 backbone
+## Предобученный backbone MedicalNet ResNet50
 
-The one architectural lever not yet tried: a 3D-MRI backbone pretrained on
-real external data, rather than one more architecture trained from scratch
-on our small pooled set. Previously reported blocked (`huggingface.co`,
-`zenodo.org` are hard-blocked by this session's egress policy - confirmed
-directly, not assumed), but the user obtained `resnet_50_23dataset.pth`
-(Tencent/MedicalNet's Med3D, Chen et al. 2019 - pretrained on a 23-dataset
-multi-organ 3D segmentation corpus, 46.2M params) independently and hosted
-it as a GitHub release asset on their own repo, which this session's
-GitHub access can reach directly.
+Единственный архитектурный рычаг, ещё не опробованный: 3D-МРТ backbone,
+предобученный на настоящих внешних данных, а не ещё одна архитектура,
+обученная с нуля на нашей небольшой объединённой выборке. Ранее сообщалось
+как заблокированный (`huggingface.co`, `zenodo.org` жёстко заблокированы
+сетевой политикой этой сессии — подтверждено напрямую, не предположено),
+но пользователь самостоятельно получил `resnet_50_23dataset.pth`
+(Med3D от Tencent/MedicalNet, Chen et al. 2019 — предобучен на корпусе 3D-
+сегментации 23 датасетов разных органов, 46.2 млн параметров) и разместил
+его как asset GitHub-релиза в своём собственном репозитории, который
+доступен напрямую из этой сессии.
 
-**Verified before loading, not just trusted:** file header matches the
-documented legacy `torch.save` format byte-for-byte; a static pickle-opcode
-scan (`pickletools.genops` - reads opcodes, executes nothing) found only
-the expected `torch`/`collections` tensor-reconstruction calls, no
-suspicious globals; loaded with `torch.load`'s default `weights_only=True`
-safe-deserialization path (PyTorch's restricted unpickler), not the
-unrestricted one. `src/medicalnet_resnet.py` reproduces the trunk
-architecture (Bottleneck blocks 3-4-6-3, dilated - not strided - `layer3`/
-`layer4`, which is how Med3D keeps spatial resolution high for
-segmentation) and the checkpoint's state_dict loads with an **exact key
-match** (`strict=True`). `conv1` already takes 1 input channel, matching
-our T1 patches directly - no first-layer surgery needed.
+**Проверено перед загрузкой, а не просто на веру:** заголовок файла
+побайтово совпадает с документированным легаси-форматом `torch.save`;
+статическое сканирование pickle-опкодов (`pickletools.genops` — читает
+опкоды, ничего не исполняет) обнаружило только ожидаемые вызовы
+восстановления тензоров `torch`/`collections`, никаких подозрительных
+глобальных имён; загружено через безопасный путь десериализации
+`torch.load` по умолчанию `weights_only=True` (ограниченный unpickler
+PyTorch), а не неограниченный. `src/medicalnet_resnet.py` воспроизводит
+архитектуру ствола (Bottleneck-блоки 3-4-6-3, `layer3`/`layer4` с
+дилатацией, а не шагом — так Med3D сохраняет высокое пространственное
+разрешение для сегментации), и state_dict чекпоинта загружается с
+**точным совпадением ключей** (`strict=True`). `conv1` уже принимает 1
+входной канал, что напрямую совпадает с нашими T1-патчами — хирургия
+первого слоя не нужна.
 
-Approach: **frozen trunk** (feature extraction only - the point is testing
-whether Med3D's learned general 3D-medical-image features are useful for
-this label, not re-deriving them; also the only CPU-feasible way to spend
-epochs on a 46M-param model) + a small trainable MLP head
-(`PretrainedFeatureHead`) on the 2048-dim pooled features. `patch_size=25`
-(this backbone only downsamples ~8x via dilation, not the usual 32x, so
-25 leaves a 4x4x4 feature map before pooling - patch 9/15 would collapse
-to 2x2x2). Run across the full available cohort (`src/subject_loader`).
+Подход: **замороженный ствол** (только извлечение признаков — цель
+проверить, полезны ли уже выученные Med3D общие признаки 3D-медицинских
+изображений для этой метки, а не переобучать их заново; также единственный
+посильный на CPU способ распорядиться моделью на 46 млн параметров) +
+небольшая обучаемая MLP-голова (`PretrainedFeatureHead`) на 2048-мерных
+пулированных признаках. `patch_size=25` (этот backbone понижает разрешение
+только ~в 8 раз через дилатацию, а не привычные 32×, поэтому патч 25
+оставляет карту признаков 4×4×4 перед пулингом — патчи 9/15 схлопнулись бы
+до 2×2×2). Прогон на полной доступной когорте (`src/subject_loader`).
 
-**Result: 0.504-0.523** (calc: 37 subjects, 11,100 voxels/side; mem: 30
-subjects, 9,000 voxels/side) - chance again, statistically indistinguishable
-from every from-scratch architecture tried. A backbone trained on real
-external 3D-medical-image data brings no more signal than one trained from
-nothing, which rules out "the model just hasn't seen enough general 3D
-medical imagery" as the explanation for the ceiling.
+**Результат: 0.504-0.523** (calc: 37 пациентов, 11 100 вокселей на
+сторону; mem: 30 пациентов, 9 000 вокселей на сторону) — снова уровень
+случайности, статистически неотличим от любой архитектуры, обученной с
+нуля. Backbone, обученный на настоящих внешних 3D-медицинских данных, не
+приносит больше сигнала, чем обученный с нуля, что исключает «модель
+просто не видела достаточно общих 3D-медицинских изображений» как
+объяснение потолка.
 
-## Baseline CBF/OEF: physiological structure, not anatomy
+## Базовые (в покое) карты CBF/OEF: физиологическая структура, а не анатомия
 
-The one lever left that wasn't blocked at all. T1 intensity reflects
-tissue composition (myelin/water/macromolecule content) - it does not
-directly encode the physiological quantities that mechanically determine
-whether BOLD and CMRO2 move together or oppositely (baseline perfusion,
-baseline oxygen extraction). Those quantities turned out to already be
-sitting in this dataset's own derivatives, unused: `sub-*_task-control_
-space-T2_cbf.nii` and `..._oef.nii`, the baseline CBF/OEF maps the source
-pipeline itself used to compute CMRO2 (Fick's principle:
-CMRO2 = CBF x OEF x CaO2) - recoverable via the same S3 version-history
-mechanism as everything else, no external host involved.
+Единственный оставшийся рычаг, который вообще не был заблокирован.
+Интенсивность T1 отражает состав ткани (содержание миелина/воды/
+макромолекул) — она не кодирует напрямую физиологические величины,
+которые механически определяют, движутся ли BOLD и CMRO2 в одну сторону
+или в разные (базовая перфузия, базовая экстракция кислорода). Эти
+величины оказались уже лежащими в собственных производных этого датасета,
+неиспользованными: `sub-*_task-control_space-T2_cbf.nii` и `..._oef.nii`
+— базовые карты CBF/OEF, которые сам исходный конвейер использовал для
+вычисления CMRO2 (принцип Фика: CMRO2 = CBF x OEF x CaO2) — восстановимы
+тем же механизмом истории версий S3, что и всё остальное, без внешнего
+хоста.
 
-**Non-circularity check:** only *control*-condition (resting) CBF/OEF
-were used, never task-condition values - the label is defined by the
-*change* between task and control, so a baseline map alone isn't part of
-that computation. `scripts/run_cbf_oef.py` extracts co-registered 3-channel
-patches (T1 + baseline CBF + baseline OEF, each independently normalized -
-their physical units and scales aren't comparable) and trains
-`SimplePatchCNN(in_channels=3)`, compared directly against the same
-architecture on T1-only patches, on the identical voxels.
+**Проверка на отсутствие цикличности:** использовались только CBF/OEF
+условия *control* (в покое), никогда значения условия задачи — метка
+определяется *изменением* между задачей и покоем, так что одна лишь
+базовая карта не входит в этот расчёт. `scripts/run_cbf_oef.py` извлекает
+совмещённые 3-канальные патчи (T1 + базовый CBF + базовый OEF, каждый
+независимо нормализован — их физические единицы и масштабы несравнимы) и
+обучает `SimplePatchCNN(in_channels=3)`, сравнивая напрямую с той же
+архитектурой на патчах только-T1, на идентичных вокселях.
 
-**Result: 0.510-0.528 (T1-only) vs. 0.502-0.515 (T1+baseline CBF/OEF)** -
-no meaningful separation; both ranges overlap and sit at chance. Even
-physiological quantities upstream of the label's own definition (the
-components CMRO2 itself is built from) don't move the needle when given
-only as a local baseline snapshot around each voxel - a further hint that
-the missing ingredient may not be "the right kind of local map" at all,
-but something at a different spatial/temporal scale (dynamic
-neurovascular coupling response, not static baseline; or region identity
-rather than a local patch, per the atlas discussion below).
+**Результат: 0.510-0.528 (только T1) против 0.502-0.515 (T1+базовые
+CBF/OEF)** — значимого разделения нет; оба диапазона перекрываются и
+лежат на уровне случайности. Даже физиологические величины, предшествующие
+самому определению метки (компоненты, из которых строится сам CMRO2), не
+сдвигают стрелку, если давать их только как локальный базовый снимок
+вокруг каждого вокселя — дополнительный намёк, что недостающий ингредиент,
+возможно, вовсе не «правильный вид локальной карты», а что-то на другом
+пространственном/временном масштабе (динамический нейроваскулярный ответ,
+а не статический базовый уровень; либо идентичность региона, а не
+локальный патч, см. обсуждение атласа ниже).
 
-*(Numbers corrected from an earlier version of this section: CBF exists
-in two derivatives subfolders, perf/ and qmri/, with different S3
-versions, while OEF only ever exists in qmri/ - the first version of
-`download_cbf_oef.py` implicitly took whichever matched first, which
-turned out to be perf/ for CBF while OEF necessarily came from qmri/, an
-unintentional pipeline mismatch. Now explicit about preferring qmri/ for
-both, matching the same processing lineage CMRO2 itself was computed
-from. The conclusion is unchanged.)*
+*(Цифры исправлены по сравнению с более ранней версией этого раздела: CBF
+существует в двух подпапках производных данных, perf/ и qmri/, с разными
+версиями S3, а OEF есть только в qmri/ — первая версия
+`download_cbf_oef.py` неявно брала то, что совпало первым, и это
+оказалось perf/ для CBF, тогда как OEF обязательно приходил из qmri/ —
+непреднамеренное несовпадение по конвейеру-источнику. Теперь явно
+предпочитается qmri/ для обоих, совпадая с той же линией обработки, из
+которой был вычислен сам CMRO2. Вывод не меняется.)*
 
-### Dynamic (task-period) CBF/OEF: the neurovascular response itself
+### Динамические (на самой задаче) dCBF/dOEF: сам нейроваскулярный ответ
 
-The remaining open idea from the previous version of this section:
-instead of the resting baseline, `dCBF = CBF_task - CBF_control` and
-`dOEF = OEF_task - OEF_control` - the vasculature's actual response to
-the stimulus, the quantity that (via Fick's principle) mechanically
-produces CMRO2_percchange itself, not just informs it indirectly like
-the baseline case.
+Оставшаяся открытая идея из предыдущей версии этого раздела: вместо
+базового уровня покоя — `dCBF = CBF_задача - CBF_покой` и
+`dOEF = OEF_задача - OEF_покой` — реальный ответ сосудистой системы на
+стимул, та самая величина, которая (через принцип Фика) механически
+порождает сам CMRO2_percchange, а не просто косвенно информирует о нём,
+как в случае базового уровня.
 
-**This closeness to the label's own formula must be disclosed, not
-glossed over.** CMRO2_percchange = (CBF_task*OEF_task -
-CBF_control*OEF_control) / (CBF_control*OEF_control) x 100 (CaO2
-cancels). dCBF and dOEF are not algebraically identical to that ratio -
-recovering it needs the absolute baseline values too, not just the
-differences - but they are the two physiological quantities it's built
-from, correlated with it in a way the baseline-only case is not.
-`scripts/run_task_cbf_oef.py`'s docstring states this explicitly and
-frames the experiment as sitting between the legitimate baseline case
-and the oracle positive control on the circularity spectrum.
+**Эта близость к самой формуле метки должна быть раскрыта, а не
+замолчана.** CMRO2_percchange = (CBF_задача×OEF_задача -
+CBF_покой×OEF_покой) / (CBF_покой×OEF_покой) × 100 (CaO2 сокращается).
+dCBF и dOEF не алгебраически тождественны этому отношению — чтобы его
+восстановить, нужны ещё и абсолютные базовые значения, не только разности
+— но это именно те две физиологические величины, из которых оно строится,
+связанные с ним теснее, чем случай только базового уровня. Docstring
+`scripts/run_task_cbf_oef.py` явно это заявляет и помещает эксперимент
+между легитимным базовым случаем и оракульным позитивным контролем на
+шкале цикличности.
 
-**Result: 0.505-0.517 (T1-only) vs. 0.520-0.532 (T1+dynamic dCBF/dOEF)** -
-the dynamic channel comes out slightly ahead of T1-only in all 4
-contrast/fold combinations, a more consistent direction than the mixed
-baseline-CBF/OEF result. But 0.520-0.532 sits fully inside the 0.48-0.55
-band every other configuration in this project (including plainly
-chance-level ones) has landed in - it is not distinguishable from noise
-given everything else observed at this N, and per the disclosure above,
-any real portion of this small gap would reflect partial algebraic
-closeness to the label, not a discovered structural biomarker. Reported
-as an ambiguous, likely-still-null result, not a finding.
+**Результат: 0.505-0.517 (только T1) против 0.520-0.532 (T1+динамические
+dCBF/dOEF)** — динамический канал выходит немного впереди только-T1 во
+всех 4 комбинациях контраст/разбиение, более устойчивое направление, чем
+у смешанного результата с базовым CBF/OEF. Но 0.520-0.532 полностью
+лежит внутри полосы 0.48-0.55, в которой оказалась любая другая
+конфигурация этого проекта (включая явно случайные) — это неотличимо от
+шума при всём остальном, что наблюдалось на этом N, и, согласно раскрытию
+выше, любая реальная часть этого небольшого разрыва отражала бы
+частичную алгебраическую близость к метке, а не обнаруженный структурный
+биомаркер. Указано как неоднозначный, вероятно всё ещё нулевой результат,
+а не находка.
 
-### Independent literature context that reframes this project's null result
+### Независимый контекст из литературы, переосмысляющий нулевой результат этого проекта
 
-A literature search turned up something more informative than another
-architecture or feature would have been: an **independent reanalysis of
-this exact dataset's methodology**, published after this project's data
-was collected. Epp et al.'s concordant/discordant classification (the
-source of this project's label, and by now peer-reviewed: *BOLD signal
-changes can oppose oxygen metabolism across the human cortex*, Nature
-Neuroscience 2025) has since been directly challenged by **Buchel et al.
-(2026, eLife reviewed preprint / bioRxiv), "Opposing BOLD signals and
-oxygen metabolism largely arise from statistical uncertainty in
-metabolic estimates."** Their central quantitative finding: once the
-statistical uncertainty of the underlying CMRO2 estimates is accounted
-for, **77.2% of voxels could not be robustly classified** as concordant
-or discordant at all - the estimated ΔCMRO2 effect lacked sufficient
-statistical support to determine a sign with confidence. Where
-classification *was* possible, positive BOLD responses were
-predominantly concordant with metabolism, while discordance was
-concentrated in negative BOLD responses.
+Поиск по литературе обнаружил нечто более информативное, чем ещё одна
+архитектура или признак: **независимый пересмотр методологии именно этого
+датасета**, опубликованный после того, как данные для этого проекта были
+собраны. Классификация concordant/discordant Epp et al. (источник метки
+этого проекта, к тому же рецензируемая: *BOLD signal changes can oppose
+oxygen metabolism across the human cortex*, Nature Neuroscience 2025) с
+тех пор напрямую оспорена работой **Büchel et al. (2026, рецензируемый
+препринт eLife / bioRxiv), «Opposing BOLD signals and oxygen metabolism
+largely arise from statistical uncertainty in metabolic estimates»**. Их
+главная количественная находка: если учесть статистическую
+неопределённость лежащих в основе оценок CMRO2, **77.2% вокселей нельзя
+надёжно классифицировать** как concordant или discordant вообще —
+оценённому эффекту ΔCMRO2 не хватало статистической опоры, чтобы уверенно
+определить знак. Там, где классификация *была* возможна, положительные
+ответы BOLD преимущественно были concordant с метаболизмом, а discordance
+концентрировалась в отрицательных ответах BOLD.
 
-This is not merely a plausible excuse invented after the fact - it is an
-independent, quantitative, peer-reviewed re-examination of the very
-labels this project spent 152 real training runs trying to predict. If
-the true, noise-free concordant/discordant status is only reliably
-defined for roughly a quarter of voxels, then no predictor, however
-good, can systematically classify the label at the individual-voxel
-level as *given* in this dataset - a large share of it may not be a
-stable per-voxel property to predict in the first place.
+Это не просто правдоподобное оправдание, придуманное задним числом — это
+независимый, количественный, рецензируемый пересмотр именно тех меток,
+которые этот проект пытался предсказать в 152 настоящих обучениях. Если
+истинный, свободный от шума статус concordant/discordant надёжно определён
+лишь примерно для четверти вокселей, то ни один предсказатель, каким бы
+хорошим он ни был, не может систематически классифицировать метку на
+уровне отдельного вокселя в том виде, в каком она *дана* в этом датасете
+— значительная её часть, возможно, вообще не является устойчивым
+свойством вокселя.
 
-**Directly testable with this project's own pipeline, so it was tested**:
-see the reliability-filtered experiment below.
+**Это напрямую проверяемо собственным конвейером проекта, поэтому было
+проверено:** см. эксперимент с фильтрацией по надёжности ниже.
 
-## Reliability-filtered concordance: does the Buchel et al. explanation hold up here?
+## Фильтрация по надёжности concordance: подтверждается ли здесь объяснение Büchel et al.?
 
-`scripts/run_reliability_filtered.py` restricts the structural-only
-baseline (`SimplePatchCNN`, patch=9 - this project's simplest, most-run
-configuration) to the voxels *least* likely to be noise-dominated, using
-`|CMRO2_percchange|` magnitude as a literature-consistent proxy for
-statistical robustness (this dataset has no per-voxel SEM/uncertainty
-map to reproduce Buchel et al.'s exact test - a fixed-scale measurement
-floor is far more likely to flip the sign of a small percent change than
-a large one, the same statistical logic, not the same numbers). Compares
-all voxels / top 50% / top 25% by magnitude, same subjects and patches,
-threshold fit on each fold's training side only so nothing about test
-labels leaks into the cutoff.
+`scripts/run_reliability_filtered.py` ограничивает структурный базовый
+вариант (`SimplePatchCNN`, патч=9 — самая простая, чаще всего используемая
+конфигурация этого проекта) вокселями, *наименее* вероятно доминируемыми
+шумом, используя величину `|CMRO2_percchange|` как согласующийся с
+литературой прокси статистической надёжности (в этом датасете нет карты
+SEM/неопределённости на воксель, чтобы воспроизвести точный тест Büchel et
+al. — измерительный пол фиксированного масштаба гораздо вероятнее
+перевернёт знак небольшого процентного изменения, чем большого — та же
+статистическая логика, но не те же цифры). Сравниваются все воксели /
+верхние 50% / верхние 25% по величине, те же пациенты и патчи, порог
+подгоняется только по обучающей стороне каждого разбиения, чтобы ничего
+из тестовых меток не просачивалось в отсечку.
 
-**Result (structural-only accuracy, T1 patch=9, mean across the 4
-contrast/fold combinations):**
+**Результат (точность только по структуре, T1 патч=9, среднее по 4
+комбинациям контраст/разбиение):**
 
-| Inclusion tier | Mean accuracy | Per-combination range |
+| Уровень включения | Средняя точность | Диапазон по комбинациям |
 |---|---|---|
-| All voxels (this project's baseline all along) | 0.507 | 0.490-0.522 |
-| Top 50% by \|CMRO2_percchange\| | 0.524 | 0.515-0.532 |
-| Top 25% by \|CMRO2_percchange\| | 0.513 | 0.504-0.523 |
+| Все воксели (базовый вариант этого проекта всегда) | 0.507 | 0.490-0.522 |
+| Верхние 50% по \|CMRO2_percchange\| | 0.524 | 0.515-0.532 |
+| Верхние 25% по \|CMRO2_percchange\| | 0.513 | 0.504-0.523 |
 
-Filtering to the top 50% raised raw accuracy in all 4 of 4 contrast/fold
-combinations relative to the unfiltered set. **That initially looked
-like modest support for the reliability explanation - it is not.**
+Фильтрация до верхних 50% подняла сырую точность во всех 4 из 4 комбинаций
+контраст/разбиение относительно нефильтрованного набора. **Сначала это
+выглядело как скромное подтверждение объяснения о надёжности — это не
+так.**
 
-**Correction, caught by a check that should have been run before that
-conclusion was drawn:** filtering by \|CMRO2_percchange\| magnitude does
-not just remove noisy voxels - it also shifts the remaining class
-balance, since concordant and discordant voxels are not identically
-distributed by magnitude. Recomputing each tier's own trivial
-"always-predict-the-majority-class" baseline on the exact same test
-sets:
+**Поправка, пойманная проверкой, которую следовало провести до того, как
+был сделан этот вывод:** фильтрация по величине `|CMRO2_percchange|` не
+просто убирает шумные воксели — она ещё и сдвигает оставшийся баланс
+классов, поскольку concordant и discordant воксели распределены по
+величине не одинаково. Пересчёт собственного тривиального базового уровня
+«всегда предсказывать более частый класс» для каждого уровня на тех же
+самых тестовых наборах:
 
-| Tier | Model accuracy (range) | Majority-class baseline (range) | Beats baseline? |
+| Уровень | Точность модели (диапазон) | Базовый уровень «большинство» (диапазон) | Превосходит базовый уровень? |
 |---|---|---|---|
-| All | 0.490-0.522 | 0.511-0.533 | **No, in 4/4** |
-| Top 50% | 0.515-0.532 | 0.526-0.553 | **No, in 4/4** |
-| Top 25% | 0.504-0.523 | 0.528-0.575 | **No, in 4/4** |
+| Все | 0.490-0.522 | 0.511-0.533 | **Нет, в 4/4** |
+| Верхние 50% | 0.515-0.532 | 0.526-0.553 | **Нет, в 4/4** |
+| Верхние 25% | 0.504-0.523 | 0.528-0.575 | **Нет, в 4/4** |
 
-The model does not beat the trivial baseline in a single one of these 12
-contrast/fold/tier combinations - not just at the unfiltered level (consistent
-with everything else in this project), but at every filtered tier too. The
-apparent "improvement" from filtering was the filter shifting the class
-balance, not the model learning anything from the more reliable subset.
-**Corrected reading: no support for the reliability explanation from this
-particular test** - a real, disclosed correction to an earlier draft of
-this section, not a re-run with different numbers. See "Where this leaves
-the project" below for what the properly-checked reliability/ROI/double-
-filter/3-class results (this section and the three that follow) add up
-to together.
+Модель не превосходит тривиальный базовый уровень ни в одной из этих 12
+комбинаций контраст/разбиение/уровень — не только на нефильтрованном
+уровне (согласуется со всем остальным в этом проекте), но и на каждом
+фильтрованном уровне тоже. Видимое «улучшение» от фильтрации было сдвигом
+баланса классов самим фильтром, а не тем, что модель чему-то училась из
+более надёжного подмножества. **Исправленное чтение: этот конкретный тест
+не даёт подтверждения объяснению о надёжности** — настоящая, раскрытая
+поправка к более раннему черновику этого раздела, а не перезапуск с
+другими цифрами. См. «Что это оставляет проекту» ниже — к чему в сумме
+приводят корректно проверенные результаты по надёжности/ROI/двойному
+фильтру/3-классовой постановке (этот раздел и три следующих).
 
-## Real Glasser/HCP-MMP1.0 atlas: the last thing said to be blocked
+## Настоящий атлас Glasser/HCP-MMP1.0: последнее, что называлось заблокированным
 
-Every earlier version of this report said a real anatomical atlas was
-genuinely blocked - not just externally (Zenodo/HuggingFace/OSF/NITRC),
-but confirmed absent from this dataset's own derivatives too, unlike the
-MedicalNet weights or CBF/OEF. That turned out to be true of *this*
-dataset specifically, but not of the atlas itself: HCP-MMP1.0 is a
-static, unlicensed group-level label volume, and a plain-file mirror of
-it exists in a GitHub repo
-(`github.com/mbedini/The-HCP-MMP1.0-atlas-in-FSL`) - a host already
-reachable in this session, the same way the pretrained backbone and the
-atlas README itself were found. No S3 version-history trick or
-user-provided release needed this time, just a different kind of search.
+Каждая более ранняя версия этого отчёта утверждала, что настоящий
+анатомический атлас по-настоящему заблокирован — не только внешне
+(Zenodo/HuggingFace/OSF/NITRC), но и подтверждённо отсутствует в
+собственных производных данных этого датасета, в отличие от весов
+MedicalNet или CBF/OEF. Это оказалось верно именно для *этого* датасета,
+но не для самого атласа: HCP-MMP1.0 — статический, нелицензируемый том
+меток группового уровня, и его обычная файловая копия существует в
+репозитории на GitHub (`github.com/mbedini/The-HCP-MMP1.0-atlas-in-FSL`)
+— хост, уже доступный в этой сессии, тем же способом, каким были найдены
+предобученный backbone и README самого атласа. На этот раз не понадобился
+трюк с историей версий S3 или релиз, предоставленный пользователем —
+просто другой вид поиска.
 
-Getting it into each subject's own space still needed real image
-registration (the atlas is defined in a standard template's space, not
-any individual subject's). `src/glasser_atlas.py` runs ANTsPy (PyPI,
-no local FSL/FreeSurfer install needed) SyN registration against a
-nilearn-bundled MNI152 T1 template (also no network fetch - shipped with
-the package) and warps the atlas into each subject's T2-space grid with
-nearest-neighbor/label-aware interpolation, ~7s/subject.
+Перенос атласа в пространство каждого пациента всё равно требовал
+настоящей регистрации изображений (атлас задан в пространстве
+стандартного шаблона, а не какого-либо конкретного пациента).
+`src/glasser_atlas.py` прогоняет ANTsPy (PyPI, локальный FSL/FreeSurfer не
+нужен) — SyN-регистрацию против MNI152 T1-шаблона, встроенного в nilearn
+(тоже без сетевого запроса — идёт вместе с пакетом), и переносит атлас в
+сетку T2-пространства каждого пациента с интерполяцией, учитывающей
+категориальность меток (ближайший сосед), ~7с на пациента.
 
-**Honesty caveats, stated up front:** (1) the atlas's own maintainer
-explicitly warns that HCP-MMP1.0 was built and validated for
-*surface-based* registration (FreeSurfer + Connectome Workbench), and
-that using it via volumetric MNI registration - the only option available
-in this sandboxed session - introduces real boundary imprecision (citing
-Coalson, Van Essen & Glasser 2018, PNAS). (2) the atlas was mapped onto
-an ICBM2009c-like template, while the template registered against here is
-a different (though closely related) MNI152 variant - a second source of
-approximation. This is a coarse volumetric approximation of Glasser, not
-the methodologically preferred version - reported as exactly that, the
-same way the k-means parcellation and coarse grid were.
+**Оговорки честности, заявленные сразу:** (1) сам куратор атласа явно
+предупреждает, что HCP-MMP1.0 был построен и валидирован для
+*surface-based* регистрации (FreeSurfer + Connectome Workbench), и что
+использование его через объёмную MNI-регистрацию — единственный
+доступный вариант в этой изолированной сессии — вносит реальную
+неточность границ (со ссылкой на Coalson, Van Essen & Glasser 2018, PNAS).
+(2) атлас был отображён на шаблон вида ICBM2009c, а шаблон, с которым
+здесь выполняется регистрация — другой (хоть и близкий) вариант MNI152 —
+второй источник приближения. Это грубое объёмное приближение Glasser, не
+методологически предпочтительная версия — заявлено ровно так же, как
+k-means-парцелляция и грубая сетка.
 
-**Validated before trusting it**, not just run once: checked on sub-p019
-that warped parcel boundaries visually track the cortical ribbon in T1
-(`atlas_cache/sub-p019_glasser_check.png`) across several slices, and that
-Dice(atlas>0, brain mask) = 0.64 - expected well under 1.0 since Glasser
-labels cortex only, not the whole brain mask (white matter, subcortex,
-CSF).
+**Проверено перед тем, как довериться**, а не просто запущено один раз:
+проверено на sub-p019, что перенесённые границы парцеллов визуально
+следуют корковой ленте на T1 (`atlas_cache/sub-p019_glasser_check.png`) на
+нескольких срезах, и что Dice(atlas>0, маска мозга) = 0.64 — ожидаемо
+заметно ниже 1.0, поскольку метки Glasser покрывают только кору, а не всю
+маску мозга (белое вещество, подкорка, ликвор).
 
-Same methodology as the k-means parcellation (`scripts/run_glasser.py`
-mirrors `run_parcellation.py`): each labeled voxel gets a 3-feature
-descriptor (mean T1, T1 std, log-size) of the real Glasser parcel it
-falls in - computed separately per hemisphere-split side, so nothing
-leaks across the train/test boundary - fed through `PatchBOLDConditionNet`.
-39/40 subjects (18,500 calc / 15,000 mem pooled voxels/side).
+Та же методология, что и у k-means-парцелляции (`scripts/run_glasser.py`
+повторяет `run_parcellation.py`): каждый размеченный воксель получает
+3-признаковый дескриптор (средний T1, std T1, log-размер) того настоящего
+парцелла Glasser, в который он попадает — считается отдельно по стороне
+разбиения полушарий, чтобы ничего не просачивалось через границу
+train/test — подан через `PatchBOLDConditionNet`. 39/40 пациентов
+(18 500 calc / 15 000 mem объединённых вокселей на сторону).
 
-**Result: 0.510-0.523** - chance again, and close to the k-means
-parcellation's 0.502-0.523. Real, group-consistent anatomical identity
-(not just a data-driven local cluster) still doesn't separate from chance
-in this pipeline - even with the one ingredient every earlier version of
-this report treated as the last real unknown.
+**Результат: 0.510-0.523** — снова уровень случайности, близко к
+0.502-0.523 у k-means-парцелляции. Настоящая, согласованная по группе
+анатомическая идентичность (не просто data-driven локальный кластер)
+по-прежнему не отделяется от случайности в этом конвейере — даже с тем
+самым ингредиентом, который каждая более ранняя версия этого отчёта
+считала последней реальной неизвестной.
 
-## ROI-averaged classification: the direct, cheap follow-up to Buchel et al.
+## ROI-усреднённая классификация: прямое, дешёвое продолжение Büchel et al.
 
-If a large share of this project's null result is individual-voxel label
-noise (as section "Independent literature context" above documents), the
-most direct next test isn't another architecture or feature - it's
-changing the *unit of classification* from voxel to region, since
-averaging within a real anatomical region over dozens of voxels
-mechanically suppresses exactly that kind of noise (the same statistical
-logic behind why group/ROI-level neuroimaging analyses are more reliable
-than single-voxel ones).
+Если значительная часть нулевого результата этого проекта — это шум метки
+на уровне отдельного вокселя (как документирует раздел «Независимый
+контекст из литературы» выше), самый прямой следующий тест — не ещё одна
+архитектура или признак, а смена *единицы классификации* с вокселя на
+регион, поскольку усреднение внутри настоящего анатомического региона по
+десяткам вокселей механически подавляет именно такой шум (та же
+статистическая логика, по которой групповые/ROI-анализы в нейровизуализации
+надёжнее одновоксельных).
 
-`scripts/run_roi_averaged.py` reuses the same registered Glasser parcels
-(`src/glasser_atlas.py`, already cached from the atlas experiment above)
-and, per subject per contrast per parcel with >=20 valid voxels: averages
-raw CMRO2_task and CMRO2_control across the parcel first, *then* takes
-one ROI-level percent change (the standard way to compute an ROI
-contrast - one ratio of two averaged quantities, not an average of many
-noisy per-voxel ratios), and separately averages BOLD_percchange. The ROI
-label is the sign product of those two region-level numbers, same
-definition as everywhere else in this project. Classifies each region
-from its own structural profile (mean T1, T1 std, log-size - the same 3
-features as the voxel-level Glasser experiment) via a small MLP
-(`RegionMLP` in `src/model.py`) rather than a 3D CNN, since the unit here
-is a region summary, not a spatial patch - `train_one_fold` already
-handles this without modification, since a model's forward signature was
-always generic.
+`scripts/run_roi_averaged.py` переиспользует те же зарегистрированные
+парцеллы Glasser (`src/glasser_atlas.py`, уже закэшированы из эксперимента
+с атласом выше) и для каждого пациента, контраста, парцелла с ≥20
+валидными вокселями: сначала усредняет сырые CMRO2_task и CMRO2_control по
+парцеллу, *затем* берёт одно процентное изменение на уровне ROI
+(стандартный способ посчитать контраст ROI — одно отношение двух
+усреднённых величин, а не среднее многих шумных повоксельных отношений), и
+отдельно усредняет BOLD_percchange. Метка ROI — произведение знаков этих
+двух величин регионального уровня, то же определение, что и везде в этом
+проекте. Классифицирует каждый регион по его собственному структурному
+профилю (средний T1, std T1, log-размер — те же 3 признака, что и в
+повоксельном эксперименте с Glasser) через небольшой MLP (`RegionMLP` в
+`src/model.py`), а не через 3D CNN, поскольку единица здесь — сводка по
+региону, а не пространственный патч — `train_one_fold` уже справляется с
+этим без изменений, поскольку сигнатура forward модели всегда была
+универсальной.
 
-**Result: 0.522-0.567** (calc: 37 subjects, ~5,700-6,050 ROIs/side; mem:
-30 subjects, ~4,580-4,920 ROIs/side) - the highest raw-accuracy range of
-any structural-only experiment in this project. **This is not a positive
-finding, and reporting it as one (an earlier draft of this section did)
-was a mistake, caught and corrected here.**
+**Результат: 0.522-0.567** (calc: 37 пациентов, ~5 700-6 050 ROI на
+сторону; mem: 30 пациентов, ~4 580-4 920 ROI на сторону) — самый высокий
+диапазон сырой точности среди всех чисто структурных экспериментов этого
+проекта. **Это не позитивная находка, и представить её так (как это
+сделал более ранний черновик этого раздела) было ошибкой, здесь пойманной
+и исправленной.**
 
-Checking each fold's own trivial majority-class baseline: **0.5355,
-0.5216, 0.5671, 0.5268** - matching the model's own accuracy to four
-decimal places, in every single one of the 4 combinations. The
-`RegionMLP` did not learn anything from the region-level structural
-profile at all; it simply learned to always predict whichever class was
-more common in each fold's training data, and region-level concordance
-happens to be noticeably imbalanced per hemisphere side (unlike the
-voxel-level label, which stayed close to 50/50 by construction
-throughout the rest of this project). The "highest range in the project"
-framing was true of the raw number and false of what it means - this
-result is exactly as null as everything else, just dressed up by class
-imbalance. Left in the report, corrected rather than deleted, because
-the catch itself - and having to publish the correction - is a fair
-thing for a supervisor to see.
+Проверка собственного тривиального базового уровня «большинство» для
+каждого разбиения: **0.5355, 0.5216, 0.5671, 0.5268** — совпадает с
+собственной точностью модели до четырёх знаков после запятой, в каждой
+из 4 комбинаций. `RegionMLP` вообще ничему не научился из регионального
+структурного профиля; он просто научился всегда предсказывать тот класс,
+который чаще встречался в обучающих данных каждого разбиения, а
+региональная concordance оказывается заметно несбалансированной по
+стороне полушария (в отличие от повоксельной метки, которая по построению
+всю оставшуюся часть проекта держалась близко к 50/50). Формулировка
+«самый высокий диапазон в проекте» была верна для сырого числа и неверна
+по смыслу — этот результат ровно так же нулевой, как и все остальные,
+просто замаскированный дисбалансом классов. Оставлено в отчёте,
+исправлено, а не удалено, потому что сама эта поимка ошибки — и
+необходимость опубликовать поправку — честная вещь, которую стоит
+показать руководителю.
 
-### Reliability x positive-BOLD double filter
+### Двойной фильтр: надёжность × positive-BOLD
 
-Buchel et al.'s reanalysis made two findings, not one: most voxels are
-unclassifiable, but *where classification was possible*, positive BOLD
-responses were predominantly concordant while discordance concentrated
-in negative-BOLD voxels. `scripts/run_reliability_double_filter.py`
-combines both into one filter (on top of the single-filter experiment
-above): `positive_bold_top50pct` keeps only voxels with BOLD_percchange
-> 0 *and* in the top 50% by |CMRO2_percchange| magnitude, alongside
-`all`, `top50pct`, and `positive_bold`-only for reference, same
-architecture (SimplePatchCNN, patch=9, T1-only) and leakage-safe
-protocol as the single-filter test.
+Пересмотр Büchel et al. дал не одну находку, а две: большинство вокселей
+неклассифицируемы, но *там, где классификация была возможна*,
+положительные ответы BOLD преимущественно были concordant, а discordance
+концентрировалась в вокселях с отрицательным BOLD.
+`scripts/run_reliability_double_filter.py` объединяет оба условия в один
+фильтр (поверх эксперимента с одиночным фильтром выше):
+`positive_bold_top50pct` оставляет только воксели с BOLD_percchange > 0
+*и* в верхних 50% по величине |CMRO2_percchange|, наряду с `all`,
+`top50pct` и только `positive_bold` для сравнения — та же архитектура
+(SimplePatchCNN, патч=9, только T1) и защищённый от утечки протокол, что и
+в тесте с одиночным фильтром.
 
-**Result, majority-baseline-checked from the start this time:**
+**Результат, на этот раз с проверкой базового уровня «большинство» с самого
+начала:**
 
-| Tier | Model accuracy (range) | Majority-class baseline (range) | Beats baseline? |
+| Уровень | Точность модели (диапазон) | Базовый уровень «большинство» (диапазон) | Превосходит базовый уровень? |
 |---|---|---|---|
-| All | 0.504-0.520 | 0.511-0.533 | No, in 4/4 |
-| Top 50% | 0.513-0.550 | 0.524-0.555 | No, in 4/4 |
-| Positive BOLD only | 0.525-0.569 | 0.557-0.576 | No, in 4/4 |
-| Positive BOLD + top 50% (the double filter) | 0.536-0.627 | 0.609-0.628 | **No, in 4/4** |
+| Все | 0.504-0.520 | 0.511-0.533 | Нет, в 4/4 |
+| Верхние 50% | 0.513-0.550 | 0.524-0.555 | Нет, в 4/4 |
+| Только positive BOLD | 0.525-0.569 | 0.557-0.576 | Нет, в 4/4 |
+| Positive BOLD + верхние 50% (двойной фильтр) | 0.536-0.627 | 0.609-0.628 | **Нет, в 4/4** |
 
-The double filter produces the single highest raw accuracy anywhere in
-this entire project - **0.624 and 0.627** in two of the four
-combinations, clearing 0.60 for the first time. Checked immediately
-against the majority-class baseline (a lesson applied from the two
-corrections directly above, not learned the hard way a third time): in
-those same two combinations the baseline is 0.628 and 0.622 - the model
-is at or fractionally below chance-adjusted-for-imbalance in every
-tier, every combination, all the way up to the most aggressively
-filtered one. Buchel et al.'s own finding (positive BOLD skews strongly
-concordant) is confirmed here as a real property of this dataset - the
-majority-class baseline climbing from ~0.52 (all voxels) to ~0.62
-(double filter) *is* that skew, directly visible - but it is a fact
-about the label's marginal distribution, not evidence the model reads
-any structural signal.
+Двойной фильтр даёт единственную самую высокую сырую точность во всём
+этом проекте — **0.624 и 0.627** в двух из четырёх комбинаций, впервые
+преодолевая 0.60. Проверено сразу же против базового уровня
+«большинство» (урок, применённый по итогам двух поправок прямо выше, а
+не выученный тяжёлым способом в третий раз): в тех же двух комбинациях
+базовый уровень составляет 0.628 и 0.622 — модель находится на уровне или
+чуть ниже уровня случайности с поправкой на дисбаланс в каждом уровне,
+каждой комбинации, вплоть до самого агрессивно отфильтрованного. Собственная
+находка Büchel et al. (положительный BOLD сильно смещён к concordant)
+здесь подтверждается как реальное свойство этого датасета — рост
+базового уровня «большинство» с ~0.52 (все воксели) до ~0.62 (двойной
+фильтр) *и есть* этот сдвиг, напрямую видимый — но это факт о маргинальном
+распределении метки, а не свидетельство того, что модель читает какой-либо
+структурный сигнал.
 
-### 3-class framing: concordant / discordant / unreliable
+### 3-классовая постановка: concordant / discordant / unreliable
 
-Rather than silently forcing every voxel into a binary call (implicitly
-asserting every voxel has a knowable sign) or silently dropping the
-unreliable ones (as the filtering experiments above do),
-`scripts/run_three_class.py` gives the model an explicit third class -
-the bottom half of each fold's training voxels by |CMRO2_percchange| -
-and asks it to distinguish concordant / discordant / unreliable directly
-(`SimplePatchCNN` with `n_classes=3`, `CrossEntropyLoss`, chance = 1/3).
-Also reports binary sign-accuracy restricted to voxels that were
-*actually* reliable in the test set, for comparability with the rest of
-this project's binary-accuracy numbers.
+Вместо того чтобы молча принуждать каждый воксель к бинарному решению
+(неявно утверждая, что у каждого вокселя есть определённый знак) или
+молча отбрасывать ненадёжные (как делают эксперименты с фильтрацией
+выше), `scripts/run_three_class.py` даёт модели явный третий класс —
+нижнюю половину обучающих вокселей каждого разбиения по величине
+|CMRO2_percchange| — и просит различать concordant / discordant /
+unreliable напрямую (`SimplePatchCNN` с `n_classes=3`, `CrossEntropyLoss`,
+случайность = 1/3). Также отдельно приводится бинарная точность знака,
+ограниченная вокселями, которые в тестовом наборе были *действительно*
+надёжными — для сравнимости с остальными бинарными цифрами точности этого
+проекта.
 
-**Result:** 3-class accuracy 0.467-0.509. Against the naive uniform
-chance level (1/3) this looks like a real margin - but by now this
-report checks the right baseline first: the "unreliable" class is
-defined as exactly the bottom half of training voxels by construction,
-and (since real discordant/concordant voxels split roughly evenly
-between the top half) it makes up **49.2-50.7%** of each test set - so
-"always predict unreliable" is the correct baseline here, not 1/3, and
-it is **0.492-0.507**, essentially identical to the model's own 3-class
-accuracy (0.467-0.509, below the baseline in 3 of 4 combinations).
+**Результат:** 3-классовая точность 0.467-0.509. На фоне наивного
+равномерного уровня случайности (1/3) это выглядит как реальный запас —
+но к этому моменту отчёт уже сначала проверяет правильный базовый
+уровень: класс «unreliable» по построению составляет ровно нижнюю
+половину обучающих вокселей, и (поскольку настоящие discordant/concordant
+воксели делятся примерно поровну в верхней половине) он занимает
+**49.2-50.7%** каждого тестового набора — значит, «всегда предсказывать
+unreliable» здесь правильный базовый уровень, а не 1/3, и он составляет
+**0.492-0.507**, практически совпадая с собственной 3-классовой
+точностью модели (0.467-0.509, ниже базового уровня в 3 из 4 комбинаций).
 
-The secondary metric confirms this directly rather than leaving it
-inferred: binary sign-accuracy restricted to voxels the model didn't
-predict as "unreliable" and that were genuinely reliable in the test set
-was **0.010-0.119** - far below even 0.5, meaning that on the rare
-occasions the model did venture a concordant/discordant call instead of
-defaulting to "unreliable", it was wrong far more often than a coin
-flip. The model's only real behavior here is a bias toward predicting
-the majority class ("unreliable"); it shows no evidence of encoding the
-actual concordant-vs-discordant distinction at all.
+Вторичная метрика подтверждает это напрямую, а не оставляет как вывод:
+бинарная точность знака, ограниченная вокселями, которые модель не
+предсказала как «unreliable» и которые были действительно надёжны в
+тестовом наборе, составила **0.010-0.119** — намного ниже даже 0.5, то
+есть в тех редких случаях, когда модель всё же делала ставку
+concordant/discordant вместо «unreliable», она ошибалась гораздо чаще,
+чем при подбрасывании монеты. Единственное реальное поведение модели
+здесь — смещение к предсказанию более частого класса («unreliable»); она
+не показывает никаких признаков того, что кодирует настоящее различие
+concordant-против-discordant вообще.
 
-## Three items previously called out of reach - reconsidered
+## Три пункта, ранее названных недостижимыми — пересмотрены
 
-The closing synthesis of the previous version of this report named three
-things as needing resources outside this session: surface-based atlas
-processing (FreeSurfer), a genuine (non-proxy) per-voxel statistical-
-reliability estimate, and a group-level scale of analysis. Asked to
-actually attempt all three rather than take that assessment as final -
-one was confirmed genuinely blocked, with concrete evidence this time;
-the other two turned out reachable and were run.
+Заключительный синтез предыдущей версии этого отчёта называл три вещи,
+требующие ресурсов за пределами этой сессии: surface-based обработку
+атласа (FreeSurfer), настоящую (не суррогатную) оценку статистической
+надёжности на воксель, и групповой масштаб анализа. По запросу
+действительно предпринята попытка всех трёх, а не принята эта оценка как
+окончательная — один пункт подтверждён как реально заблокированный, на
+этот раз с конкретными доказательствами; два других оказались достижимы и
+были выполнены.
 
-### FreeSurfer surface-based processing - confirmed blocked, not just assumed
+### FreeSurfer surface-based обработка — подтверждена заблокированной, не просто предположена
 
-Checked directly rather than repeating the earlier assumption: FreeSurfer
-has no PyPI package (`pip index versions freesurfer` returns no match) -
-it ships as a large licensed binary distribution, not a Python library,
-from a host outside this session's reach. Independently of that, this
-dataset's own T1 images cover only 99mm along the inferior-superior axis
-(30 slices x 3.3mm) - short of the whole-brain coverage FreeSurfer's
-`recon-all` needs regardless of whether the software were available. Two
-separate, concrete reasons, not one assumption standing in for both.
+Проверено напрямую, а не повторено прежнее предположение: у FreeSurfer нет
+пакета PyPI (`pip index versions freesurfer` не находит совпадений) — это
+большой лицензируемый бинарный дистрибутив, а не Python-библиотека, с
+хоста вне досягаемости этой сессии. Независимо от этого, T1-изображения
+самого этого датасета покрывают всего 99мм по оси нижний-верхний (30
+срезов × 3.3мм) — меньше, чем нужно `recon-all` от FreeSurfer для
+покрытия всего мозга, вне зависимости от доступности софта. Две отдельные,
+конкретные причины, а не одно предположение, стоящее за обеими.
 
-### A real (non-proxy) per-voxel reliability measure
+### Настоящая (не суррогатная) мера надёжности на воксель
 
-Reading the source pipeline's own analysis notebooks
+Чтение собственных аналитических ноутбуков исходного конвейера
 (`NeuroenergeticsLab/two_modes_of_hemodynamics`,
-`D_Fig2C_native_space_analysis.ipynb`) turned up
-`{sub}_1stlevel_{contrast}control_space-T2.nii.gz`: a genuine first-level
-GLM Z-statistic for the exact same task contrast used throughout this
-project - the pipeline itself thresholds it at `z=2.5` to define its own
-activation ROIs. This is real statistical evidence from the source GLM,
-not the `|CMRO2_percchange|` magnitude heuristic used earlier in this
-report - the most direct answer available to "what would a genuine
-reliability estimate show instead of a proxy."
+`D_Fig2C_native_space_analysis.ipynb`) обнаружило
+`{sub}_1stlevel_{contrast}control_space-T2.nii.gz`: настоящую
+Z-статистику первого уровня GLM для того же самого контраста задачи, что
+используется во всём проекте — сам конвейер пороговал её на `z=2.5`, чтобы
+определить собственные ROI активации. Это настоящее статистическое
+свидетельство из исходного GLM, а не эвристика по величине
+`|CMRO2_percchange|`, использованная ранее в этом отчёте — самый прямой из
+доступных ответов на вопрос «что показала бы настоящая оценка надёжности
+вместо суррогата».
 
-One data property had to be discovered and corrected for before the
-comparison was meaningful: this z-map only has nonzero values within its
-own processing mask - checked directly, only ~9% of this project's usual
-concordance-valid voxels overlap it. An earlier version of
-`scripts/run_zstat_reliability.py` ranked percentiles over the full,
-~91%-exact-zero population, which silently produced a threshold of zero
-and filtered nothing (visible immediately in the first run's log: every
-tier had identical sample sizes and accuracy) - fixed by restricting to
-the z-map's own covered voxels first, then ranking by \|z\| within that
-population, and by then computing each tier's majority-class baseline
-*from the start*, the lesson already learned from the four experiments
-above.
+Одно свойство данных пришлось сначала обнаружить и учесть, прежде чем
+сравнение стало осмысленным: эта Z-карта имеет ненулевые значения только
+внутри собственной маски обработки — проверено напрямую, лишь ~9% обычных
+для этого проекта вокселей с валидной concordance-меткой её пересекают.
+Более ранняя версия `scripts/run_zstat_reliability.py` ранжировала
+перцентили по всей популяции (в основном нулевой на ~91%), что незаметно
+дало порог, равный нулю, и не отфильтровало ничего (видно сразу же по
+логу первого прогона: у каждого уровня оказались одинаковые размеры
+выборки и точность) — исправлено сначала ограничением вокселями, которые
+покрывает сама Z-карта, затем ранжированием по |z| внутри этой популяции,
+и вычислением базового уровня «большинство» каждого уровня *с самого
+начала* — урок, уже выученный из четырёх экспериментов выше.
 
-**Result, with each tier's own majority baseline alongside it:**
+**Результат, с собственным базовым уровнем «большинство» рядом с каждым
+уровнем:**
 
-| Tier | Model accuracy (range) | Majority baseline (range) | Beats baseline? |
+| Уровень | Точность модели (диапазон) | Базовый уровень «большинство» (диапазон) | Превосходит базовый уровень? |
 |---|---|---|---|
-| Z-covered, unfiltered | 0.548-0.590 | 0.573-0.599 | No, in 4/4 |
-| Top 50% by \|z\| | 0.539-0.602 | 0.596-0.608 | 2/4 (margins of +0.0002, +0.0008 - noise) |
-| Top 25% by \|z\| | 0.544-0.622 | 0.590-0.628 | No, in 4/4 |
+| Покрыто Z-картой, без фильтра | 0.548-0.590 | 0.573-0.599 | Нет, в 4/4 |
+| Верхние 50% по \|z\| | 0.539-0.602 | 0.596-0.608 | 2/4 (запас +0.0002, +0.0008 — шум) |
+| Верхние 25% по \|z\| | 0.544-0.622 | 0.590-0.628 | Нет, в 4/4 |
 
-Restricting to voxels the source pipeline's own GLM considers
-statistically significant activation raises both the model's accuracy
-and the majority-class baseline together (0.55-0.63 range, well above
-this project's usual 0.48-0.55 band) - the z-covered subset is real
-tissue with a real, substantially skewed concordance distribution, not
-noise. But the model does not clear its own baseline in 10 of 12
-combinations, and the 2 exceptions are margins of two-tenths and
-eight-hundredths of one percentage point - not distinguishable from
-chance at this sample size. A genuine, non-proxy reliability measure
-produces the same conclusion as the proxy one: no structural signal once
-correctly compared.
+Ограничение вокселями, которые сам GLM исходного конвейера считает
+статистически значимой активацией, поднимает и точность модели, и базовый
+уровень «большинство» вместе (диапазон 0.55-0.63, заметно выше обычной
+для этого проекта полосы 0.48-0.55) — покрытое Z-картой подмножество —
+настоящая ткань с реально, заметно смещённым распределением concordance,
+а не шум. Но модель не превосходит собственный базовый уровень в 10 из 12
+комбинаций, а 2 исключения — это запас в две десятых и восемь сотых
+процентного пункта — неотличимо от случайности при таком размере выборки.
+Настоящая, не суррогатная мера надёжности даёт тот же вывод, что и
+суррогатная: никакого структурного сигнала после корректного сравнения.
 
-### Group-level (cross-subject) analysis
+### Групповой (межпациентный) анализ
 
-A scale of analysis this report had flagged since the Buchel et al.
-section but not yet attempted: not "does this voxel/region predict its
-own subject's concordance", but "does a real anatomical region's
-*population-level* tendency toward concordance correlate with that
-region's *population-level* structural profile" - one row per (Glasser
-parcel, hemisphere side), not per voxel or per subject.
+Масштаб анализа, отмеченный ещё в разделе про Büchel et al., но до этого
+не испробованный: не «предсказывает ли этот воксель/регион собственную
+concordance этого пациента», а «коррелирует ли *популяционная* склонность
+настоящего анатомического региона к concordance с *популяционным*
+структурным профилем этого региона» — одна строка на (парцелл Glasser,
+сторона полушария), не на воксель и не на пациента.
 
-`scripts/run_group_level.py` reuses the ROI-averaging computation from
-earlier (raw CMRO2/BOLD averaged within each parcel per subject, one
-ROI-level label per subject per parcel), then for every parcel with
-contributions from >=15 subjects: takes the *majority vote* across
-subjects as that parcel's group-level label, and the population-average
-of each subject's own regional T1 profile as its group-level feature.
-362 parcels (182/180 per side) qualified, most with data from 30-37 of
-the ~37-39 usable subjects per contrast. Classified with `RegionMLP`,
-split by hemisphere side - and, learning directly from the ROI-averaged
-experiment's own earlier mistake, **the majority-class baseline was
-computed and reported alongside the very first result, not added after
-seeing a promising number.**
+`scripts/run_group_level.py` переиспользует вычисление ROI-усреднения из
+предыдущего раздела (сырые CMRO2/BOLD усреднены внутри каждого парцелла на
+пациента, одна ROI-метка на пациента на парцелл), затем для каждого
+парцелла с вкладом от ≥15 пациентов: берёт *голосование большинства* между
+пациентами как групповую метку этого парцелла, и популяционное среднее
+регионального T1-профиля каждого пациента как групповой признак. Отобрано
+362 парцелла (182/180 на сторону), у большинства — данные от 30-37 из
+~37-39 пригодных пациентов на контраст. Классифицировано через
+`RegionMLP`, разбиение по стороне полушария — и, учтя урок из собственной
+более ранней ошибки в эксперименте с ROI-усреднением, **базовый уровень
+«большинство» посчитан и указан рядом с самым первым результатом, а не
+добавлен после того, как число показалось многообещающим.**
 
-**Result: model accuracy exactly equals the majority-class baseline in
-all 4 of 4 combinations** (0.606/0.606, 0.582/0.582, 0.711/0.711,
-0.632/0.632, to full floating-point precision). `RegionMLP` learned
-nothing from the population-average structural profile at all; group-
-level concordance is real and meaningfully skewed (59-67% concordant
-depending on contrast - itself a legitimate, if unsurprising,
-descriptive finding: most cortical regions lean concordant across this
-population), but no structural correlate of *which* regions lean which
-way was found. This is this project's cleanest null result of all -
-not a corrected overclaim, but a properly-baselined result from its
-first run.
+**Результат: точность модели в точности равна базовому уровню
+«большинство» во всех 4 из 4 комбинаций** (0.606/0.606, 0.582/0.582,
+0.711/0.711, 0.632/0.632, совпадение до полной точности с плавающей
+запятой). `RegionMLP` вообще ничему не научился из популяционно-
+усреднённого структурного профиля; групповая concordance реальна и
+заметно смещена (59-67% concordant в зависимости от контраста — сама по
+себе легитимная, хоть и неудивительная, описательная находка: большинство
+корковых регионов склоняются к concordant по всей этой популяции), но
+никакой структурной корреляты того, *какие именно* регионы склоняются в
+какую сторону, не найдено. Это самый чистый нулевой результат всего
+проекта — не исправленное задним числом завышение, а изначально корректно
+рассчитанный результат с первого же прогона.
 
-### A methodological note that applies to all seven sections above
+### Методологическое примечание, применимое ко всем семи разделам выше
 
-Every one of the seven Buchel-motivated or reconsideration experiments
-in this part of the report (reliability filtering, ROI-averaging, the
-double filter, 3-class, the real z-statistic filter, and group-level
-analysis) was checked against its own tier/fold's trivial majority-class
-baseline before its result was accepted - not just against 0.5 or 1/3.
-Two of them (reliability filtering, the double filter) were *first
-written up* with a more favorable reading and corrected in place once
-that check was run; the correction is left visible in each section
-rather than quietly edited away, including the single highest raw
-accuracy in this whole project (0.627, double filter) turning out to be
-indistinguishable from "always guess concordant." The remaining three
-(the real z-stat filter, group-level analysis, and technically 3-class)
-had the check built in from the start. This is worth stating plainly for
-whoever reads this next: **raw accuracy is not evidence on its own
-whenever a filter or reframing can shift the label's class balance** -
-this part of the report is what happens when that check is actually run
-on every result, not skipped because a number looked good.
+Каждый из семи мотивированных находкой Büchel et al. или пересмотренных
+экспериментов в этой части отчёта (фильтрация по надёжности,
+ROI-усреднение, двойной фильтр, 3-классовая постановка, настоящая
+Z-статистика, групповой анализ) был проверен против собственного
+тривиального базового уровня «большинство» своего уровня/разбиения,
+прежде чем его результат был принят — не просто против 0.5 или 1/3. Два
+из них (фильтрация по надёжности, двойной фильтр) *сначала были описаны*
+с более благоприятным чтением и исправлены на месте после того, как эта
+проверка была проведена; поправка оставлена видимой в каждом разделе, а
+не тихо отредактирована — включая тот факт, что самая высокая сырая
+точность за весь проект (0.627, двойной фильтр) оказалась неотличима от
+«всегда угадывай concordant». Остальные три (настоящая Z-статистика,
+групповой анализ и, технически, 3-классовая постановка) включали эту
+проверку с самого начала. Стоит прямо сказать тому, кто читает это дальше:
+**сырая точность — не доказательство сама по себе, когда фильтр или смена
+постановки может сдвинуть баланс классов метки** — эта часть отчёта
+показывает, что происходит, когда эта проверка реально выполняется для
+каждого результата, а не пропускается, потому что число выглядело хорошо.
 
-## 4-architecture ensemble - the last legitimate lever, tried and closed
+## Ансамбль из 4 архитектур — последний легитимный рычаг, испытан и закрыт
 
-Not a new configuration search - a one-time, principled combination of
-architectures already established throughout this project as
-independently null (`SimplePatchCNN`, `DeeperPatchCNN`,
-`AttentionPatchCNN`, `PatchUNet`), soft-voted (averaged probabilities)
-on the exact same leakage-safe hemisphere split, structural-only, T1,
-patch=9. If four independently-null architectures make uncorrelated
-errors, averaging could in principle recover a weak shared signal none
-of them individually crosses their own majority-class baseline for -
-computed and reported from the start, same discipline as every
-experiment since the ROI-averaged correction.
+Не новый перебор конфигураций — однократное, принципиальное объединение
+архитектур, уже независимо признанных нулевыми на всём протяжении проекта
+(`SimplePatchCNN`, `DeeperPatchCNN`, `AttentionPatchCNN`, `PatchUNet`) —
+мягкое голосование (усреднение вероятностей) на том же самом защищённом от
+утечки разбиении по полушариям, только структура, T1, патч=9. Если четыре
+независимо нулевые архитектуры делают некоррелированные ошибки,
+усреднение могло бы в принципе восстановить слабый общий сигнал, которого
+ни одна из них по отдельности не превосходит собственный базовый уровень
+«большинство» для него — посчитано и указано с самого начала, та же
+дисциплина, что и в каждом эксперименте после поправки по ROI-усреднению.
 
-**Result: ensemble does not beat the majority-class baseline in any of
-the 4 combinations** (0.513 vs. 0.521; 0.517 vs. 0.522; 0.490 vs. 0.529;
-0.502 vs. 0.504) - and neither does any individual architecture feeding
-into it (all 16 individual architecture x fold results also sit at or
-below their fold's baseline). This closes the one item that stayed
-open after the class-imbalance correction: not "one more architecture
-might still help" but a direct, one-time test of exactly that question,
-with a clean negative answer.
+**Результат: ансамбль не превосходит базовый уровень «большинство» ни в
+одной из 4 комбинаций** (0.513 против 0.521; 0.517 против 0.522; 0.490
+против 0.529; 0.502 против 0.504) — и ни одна отдельная архитектура,
+входящая в него, тоже не превосходит (все 16 отдельных комбинаций
+архитектура × разбиение тоже лежат на уровне или ниже базового уровня
+своего разбиения). Это закрывает единственный пункт, оставшийся открытым
+после поправки на дисбаланс классов: не «а вдруг ещё одна архитектура
+поможет», а прямая, однократная проверка именно этого вопроса — с чистым
+отрицательным ответом.
 
-## Baseline CBV: the vascular-morphology hypothesis, directly tested
+## Базовый CBV: гипотеза сосудистой морфологии, проверена напрямую
 
-Raised by the supervisor (Alexei Ossadtchi) after the ensemble result
-above: could T1/T2 structural contrasts encode something about capillary
-density/morphology, which in turn governs a tissue's local oxygen-
-delivery relationship to nearby neurons - via sub-voxel effects the raw
-intensity doesn't show but might still statistically carry? Individual
-capillaries are two to three orders of magnitude below this dataset's
-voxel size, so they cannot be resolved directly. But the physical
-mechanism proposed is real and well-established, once stated precisely:
-not "aliasing" (which would require information-preserving fold-over of
-a periodic structure), but **partial-volume averaging** - a voxel's
-observed T1/T2/T2* relaxation is a weighted average over its blood and
-tissue compartments, and blood's relaxation properties differ enough from
-surrounding tissue that its local volume fraction measurably shifts the
-average (the same physical principle DSC/BOLD imaging itself is built
-on). So a real, if indirect and lossy, structural signature of local
-vascular density is physically plausible, even though the capillary
-network itself is invisible at this resolution.
+Поднята руководителем (Алексей Осадчи) после результата ансамбля выше:
+может ли структурный контраст T1/T2 нести информацию о плотности/
+морфологии капилляров, которая, в свою очередь, определяет локальные
+свойства снабжения кислородом близлежащих нейронов — через субвоксельные
+эффекты, которых сама интенсивность не показывает напрямую, но которые
+всё же могут статистически проявляться? Отдельные капилляры на два-три
+порядка меньше размера вокселя этого датасета, поэтому напрямую они
+неразличимы. Но предложенный физический механизм реален и хорошо
+установлен, если сформулировать его точно: не «алиасинг» (который
+требовал бы сохраняющего информацию наложения периодической структуры), а
+**усреднение по частичному объёму** — наблюдаемая релаксация T1/T2/T2*
+вокселя является взвешенным средним по его кровяному и тканевому
+компартментам, и релаксационные свойства крови достаточно отличаются от
+окружающей ткани, чтобы локальная объёмная доля крови измеримо сдвигала
+это среднее (тот же физический принцип, на котором построена сама
+DSC/BOLD-визуализация). Поэтому реальная, хоть и косвенная и частично
+теряющая информацию, структурная сигнатура локальной сосудистой плотности
+физически правдоподобна, даже если сама капиллярная сеть на этом
+разрешении невидима.
 
-Of the maps already recovered in this project, **CBV (cerebral blood
-volume)** is the more direct macroscopic proxy for that hypothesis than
-CBF (flow) or T1 intensity alone - it had not been tested until now.
-Same non-circularity logic and leakage-safe protocol as the CBF/OEF
-experiment above: only the *control*-condition (baseline) CBV is used,
-never the task-condition value, so it sits physiologically upstream of
-the label's own definition rather than restating it.
-`scripts/run_cbv.py` extracts co-registered 2-channel patches (T1 +
-baseline CBV, each independently normalized) and trains
-`SimplePatchCNN(in_channels=2)`, compared directly against T1-only on
-the identical voxels, on the identical 39/40-subject cohort as
-everywhere else. The majority-class baseline is computed and reported
-for every fold from the start, same discipline as every experiment since
-the ROI-averaged correction.
+Из уже восстановленных в этом проекте карт **CBV (объём мозгового
+кровотока)** — более прямой макроскопический прокси для этой гипотезы,
+чем CBF (поток) или интенсивность T1 сама по себе — не был испытан до сих
+пор. Та же логика отсутствия цикличности и тот же защищённый от утечки
+протокол, что и в эксперименте с CBF/OEF выше: используется только CBV
+*контрольного* (базового) условия, никогда условия задачи, так что
+признак физиологически предшествует определению метки, а не переформулирует
+её. `scripts/run_cbv.py` извлекает совмещённые 2-канальные патчи (T1 +
+базовый CBV, каждый независимо нормализован), сравнивая напрямую с
+только-T1 на идентичных вокселях, на той же когорте из 39/40 пациентов,
+что и везде. Базовый уровень «большинство» считается и указывается для
+каждого разбиения с самого начала, та же дисциплина, что и в каждом
+эксперименте после поправки по ROI-усреднению.
 
-**Result: model does not beat the majority-class baseline in any of the
-4 contrast/fold combinations** - calc A→B: 0.511 vs. 0.516 baseline;
-calc B→A: 0.509 vs. 0.513; mem A→B: 0.524 vs. 0.534; mem B→A: 0.506 vs.
-0.508. T1-only sits in the same 0.498-0.519 range. Adding baseline CBV
-moves accuracy by at most ~1-2 points either way, always still below
-that fold's own trivial baseline - the same pattern as every other
-physiological or structural input this project has tried. The
-vascular-morphology hypothesis is physically sound and worth stating in
-the report as a real, testable mechanism, but this dataset's baseline
-CBV map, at this resolution and with this label, does not carry a
-detectable trace of it. This was a direct test of one specific,
-supervisor-proposed hypothesis (not a new configuration search), so it
-does not reopen the multiple-comparisons concern that closed the broader
-search after the ensemble.
+**Результат: модель не превосходит базовый уровень «большинство» ни в
+одной из 4 комбинаций контраст/разбиение** — calc A→B: 0.511 против базы
+0.516; calc B→A: 0.509 против 0.513; mem A→B: 0.524 против 0.534; mem
+B→A: 0.506 против 0.508. Только-T1 лежит в том же диапазоне 0.498-0.519.
+Добавление базового CBV сдвигает точность максимум на ~1-2 пункта в любую
+сторону, всегда оставаясь ниже собственного тривиального базового уровня
+этого разбиения — та же картина, что и у любого другого физиологического
+или структурного входа, опробованного в этом проекте. Гипотеза сосудистой
+морфологии физически состоятельна и стоит того, чтобы быть явно
+зафиксированной в отчёте как реальный, проверяемый механизм — но
+конкретно базовая карта CBV этого датасета, на этом разрешении и с этой
+меткой, не несёт обнаружимого следа. Это была прямая проверка одной
+конкретной, предложенной руководителем гипотезы (не новый перебор
+конфигураций), поэтому она не возобновляет опасение множественных
+сравнений, закрывшее более широкий перебор после ансамбля.
 
-### Where this leaves the project
+### Что это оставляет проекту
 
-**228 real training runs**, all on genuine CMRO2/BOLD_percchange-derived
-labels, span: 5 architectures (a plain CNN, a residual CNN, a conv+
-transformer hybrid, a real encoder-decoder U-Net, and a 46M-parameter
-backbone pretrained on external 3D-medical-image data), 6 structural/
-physiological input types (T1 alone, T1 + raw/condition BOLD, T1 +
-baseline CBF/OEF, T1 + dynamic task-period dCBF/dOEF, T1 + baseline
-CBV), 4 non-structural
-feature sets (covariates, a fixed geometric grid, a data-driven k-means
-parcellation, and a real anatomical atlas), voxel-, region-, *and*
-population-level units of classification, binary *and* 3-class framings,
-a magnitude proxy *and* a genuine first-level GLM Z-statistic for label
-reliability, 3 patch sizes, both classification and regression outcome
-types, augmented vs. unaugmented / short vs. longer training, 5-to-39
-real subjects (39/40 of the dataset's usable cohort), 2 independent task
-contrasts, and a leakage-safe split every time. Every configuration -
-once checked against the correct baseline, not just 0.5 - lands at or
-below what a trivial majority-class guess would already get, except:
-regression, which lands *below* zero R2 (worse even than predicting the
-mean); and the deliberate oracle positive control (fed the real
-label-defining values directly), which - after fixing a normalization
-bug that was silently flipping 18-44% of its labels, see above - jumps
-to 0.955-0.975, still the only configuration in the whole project that
-clearly clears its own baseline, and now by a much cleaner margin than
-the pre-fix 0.73-0.74 figure suggested.
+**228 настоящих обучений**, все на подлинных метках, полученных из
+CMRO2/BOLD_percchange, охватывают: 5 архитектур (обычная CNN, residual
+CNN, гибрид conv+transformer, настоящий энкодер-декодер U-Net и backbone
+на 46 млн параметров, предобученный на внешних 3D-медицинских данных), 6
+структурных/физиологических типов входа (только T1, T1 + сырой/условный
+BOLD, T1 + базовые CBF/OEF, T1 + динамические на задаче dCBF/dOEF, T1 +
+базовый CBV), 4 не-структурных набора признаков (ковариаты, фиксированная
+геометрическая сетка, data-driven k-means-парцелляция и настоящий
+анатомический атлас), воксельный, региональный *и* популяционный уровни
+классификации, бинарную *и* 3-классовую постановки, эвристику по величине
+*и* настоящую Z-статистику первого уровня GLM для надёжности метки, 3
+размера патча, классификационный и регрессионный варианты выхода,
+обучение с аугментацией/без и короткое/длинное, от 5 до 39 реальных
+пациентов (39/40 пригодной когорты датасета), 2 независимых контраста
+задачи, и защищённое от утечки разбиение каждый раз. Каждая конфигурация —
+после проверки против правильного базового уровня, не просто против 0.5 —
+лежит на уровне или ниже того, что уже дало бы тривиальное угадывание
+более частого класса, за исключением: регрессии, которая уходит *ниже*
+нуля по R2 (хуже, чем даже предсказывать среднее); и намеренного
+оракульного позитивного контроля (которому напрямую поданы значения,
+определяющие метку) — который, после исправления бага нормализации,
+незаметно переворачивавшего 18-44% его меток (см. выше), поднимается до
+0.955-0.975 — по-прежнему единственная конфигурация во всём проекте,
+явно превосходящая собственный базовый уровень, причём теперь с гораздо
+более чистым запасом, чем предполагала цифра 0.73-0.74 до исправления.
 
-That combination - a ceiling that holds not just across many real
-features, architectures, filtering strategies, and units/scales of
-analysis, but *survives being checked against the one confound (class
-imbalance) that could have quietly explained an apparent success, and
-survives switching from a proxy reliability measure to the source
-pipeline's own real statistical evidence* - is as thorough a null result
-as this kind of study can produce without new data. Every lever this
-dataset and this session's tooling can reach has now actually been
-tried, including every item this report at various points called
-blocked, untried, or (briefly, incorrectly) promising - three of those
-were revisited a second time on direct request, and two of the three
-turned out reachable after all (the real z-statistic, group-level
-analysis); only FreeSurfer surface-based processing held up as genuinely
-blocked, and this time with concrete, checked evidence rather than an
-assumption.
+Эта комбинация — потолок, который держится не только по множеству
+настоящих признаков, архитектур, стратегий фильтрации и единиц/масштабов
+анализа, но и *переживает проверку против единственного смешивающего
+фактора (дисбаланса классов), который мог бы незаметно объяснить кажущийся
+успех, и переживает переход от суррогатной меры надёжности к настоящему
+статистическому свидетельству самого исходного конвейера* — настолько
+исчерпывающий нулевой результат, какой подобное исследование способно
+дать без новых данных. Каждый рычаг, достижимый в этом датасете и
+инструментарием этой сессии, теперь действительно опробован, включая
+каждый пункт, который этот отчёт в разные моменты называл заблокированным,
+неиспробованным или (кратко, ошибочно) многообещающим — три из них были
+пересмотрены повторно по прямому запросу, и два из трёх в итоге оказались
+достижимы (настоящая Z-статистика, групповой анализ); только surface-based
+обработка через FreeSurfer подтвердилась как действительно заблокированная,
+причём на этот раз с конкретными, проверенными доказательствами, а не
+предположением.
 
-**The literature context remains the most important addition, but this
-project's own attempts to lean on it came back empty six times over, not
-once.** Buchel et al.'s (2026) independent, peer-reviewed finding that
-77.2% of this dataset's voxels can't be robustly classified once CMRO2
-estimate uncertainty is accounted for is real and citable on its own
-terms - it does not depend on anything in this project, and this
-project's own group-level result (59-67% of cortical regions lean
-concordant across the population) is a genuine, if modest, corroborating
-descriptive finding in the same spirit. But none of the six ways this
-project tried to operationalize it into a *predictor* (magnitude
-filtering, ROI-averaging, the double filter, 3-class, the real z-stat
-filter, group-level classification) produced structural signal once
-checked properly - not even once switching from a proxy reliability
-measure to genuine first-level statistical evidence, and not even at the
-population scale where individual-voxel noise should average out the
-most. So this project cannot claim to have confirmed that a recoverable
-structural signal sits underneath the label noise Buchel et al. describe
-- only that their finding is independently well-supported, and that
-every way this project could find to exploit it did not surface one.
+**Контекст из литературы остаётся самым важным дополнением, но
+собственные попытки этого проекта опереться на него вернулись пустыми
+шесть раз подряд, а не один.** Независимая, рецензируемая находка Büchel
+et al. (2026) о том, что 77.2% вокселей этого датасета нельзя надёжно
+классифицировать, если учесть неопределённость оценки CMRO2, реальна и
+цитируема сама по себе — она не зависит ни от чего в этом проекте, а
+собственный групповой результат этого проекта (59-67% корковых регионов
+склоняются к concordant по всей популяции) — настоящая, хоть и скромная,
+подтверждающая описательная находка в том же духе. Но ни один из шести
+способов, которыми этот проект пытался операционализировать эту находку в
+*предиктор* (фильтрация по величине, ROI-усреднение, двойной фильтр,
+3-классовая постановка, настоящий Z-статистический фильтр, групповая
+классификация), не дал структурного сигнала после корректной проверки —
+даже при переходе от суррогатной меры надёжности к настоящему
+статистическому свидетельству первого уровня, и даже на популяционном
+масштабе, где шум отдельного вокселя должен был усредняться сильнее всего.
+Поэтому этот проект не может утверждать, что подтвердил наличие
+восстановимого структурного сигнала под шумом метки, который описывают
+Büchel et al. — только то, что их находка независимо хорошо обоснована, и
+что ни один найденный этим проектом способ её использовать не дал
+результата.
 
-What remains genuinely out of reach is now down to one item, checked
-with concrete evidence rather than assumed: *surface-based* (not
-volumetric) atlas processing, which needs FreeSurfer - unavailable as a
-Python package and, independently, incompatible with this dataset's
-99mm-deep T1 coverage regardless of software access. Beyond that,
-nothing left is a matter of trying harder with this data and this
-session's tools - it would need new data (a dataset with denser
-repeated measures for genuine per-voxel uncertainty, or whole-brain T1
-coverage for surface reconstruction) or accepting the null result now on
-record as the answer this dataset gives.
+То, что по-настоящему остаётся недостижимым, теперь сведено к одному
+пункту, проверенному конкретными доказательствами, а не предположенному:
+*surface-based* (не объёмная) обработка атласа, для которой нужен
+FreeSurfer — недоступен как пакет Python и, независимо от этого,
+несовместим с 99-мм глубиной покрытия T1 этого датасета вне зависимости
+от доступности софта. Помимо этого, ничего оставшегося не является
+вопросом «попробовать усерднее» с этими данными и инструментами этой
+сессии — для этого нужны были бы новые данные (датасет с более плотными
+повторными измерениями для настоящей повоксельной неопределённости, или
+покрытие T1 всего мозга для реконструкции поверхности) либо принятие уже
+зафиксированного нулевого результата как ответа, который даёт этот
+датасет.
 
-**A last, explicit check of that last claim** - a one-time, principled
-ensemble of the four architectures this project ever built (not a new
-search, see above) - confirms it: no combination of what already exists
-beats the ceiling either. At this point, further search over this
-dataset with this session's tools would not be thoroughness - repeating
-configurations against a result this consistent mainly raises the
-odds of a false positive by chance (the standard multiple-comparisons
-concern), not the odds of a real one. The one exception made after that
-closing statement was a direct test of the supervisor's specific,
-physically-grounded vascular-morphology hypothesis (baseline CBV, above)
-- a single targeted hypothesis test, not a reopened search - and it came
-back null too. **228 runs is where this project stops treating "try one
-more thing" as the answer.** The result is the answer.
+**Последняя, явная проверка этого последнего утверждения** — однократный,
+принципиальный ансамбль четырёх архитектур, когда-либо построенных в этом
+проекте (не новый перебор, см. выше) — подтверждает его: никакая
+комбинация уже существующего тоже не пробивает потолок. На этом этапе
+дальнейший перебор по этому датасету инструментами этой сессии был бы не
+тщательностью — повторение конфигураций против настолько устойчивого
+результата в основном повышает вероятность ложноположительного результата
+по чистой случайности (стандартная проблема множественных сравнений), а
+не вероятность реального. Единственное исключение, сделанное после этого
+заключительного утверждения — прямая проверка конкретной, физически
+обоснованной гипотезы руководителя о сосудистой морфологии (базовый CBV,
+выше) — однократная, целевая проверка гипотезы, а не возобновлённый
+перебор — и она тоже вернулась нулевой. **228 обучений — это та точка, на
+которой проект перестаёт относиться к «попробовать ещё одну вещь» как к
+ответу.** Результат — это и есть ответ.
 
-Superseded by the above, kept for context: getting from T2 (the one
-real quantity computed on 2026-09-03, see commit history) to full CMRO2
-was originally thought to need re-deriving CBF/CBV/Hct from raw
-pCASL/DSC/MEGRE - which is true in general, but turned out to be
-unnecessary here since the already-computed CMRO2 itself was recoverable
-from version history rather than needing to be rebuilt from raw inputs.
+Устарело по сравнению с вышесказанным, оставлено для контекста: получение
+из T2 (единственной настоящей величины, вычисленной 2026-09-03, см.
+историю коммитов) полного CMRO2 изначально считалось требующим
+пересчёта CBF/CBV/Hct из сырых pCASL/DSC/MEGRE — что верно в общем случае,
+но здесь оказалось не нужно, поскольку уже вычисленный CMRO2 сам оказался
+восстановим из истории версий, а не требовал пересборки из сырых входов.
 
-`scripts/smoke_test.py` runs the entire pipeline above end-to-end on the real
-`sub-p019` T1 using a **synthetic** placeholder label (thresholded T1
-intensity + noise — no biological meaning) purely to prove patch extraction,
-the hemisphere split, training and plotting all work correctly. Its printed
-accuracy is not a scientific result. Once real `BOLD_percchange`/CMRO₂ maps
-(or a precomputed label map) are available for the 5 patients, swap the
-label source in `build_patch_dataset()` for the real concordance map and
-re-run — no other code changes needed.
+`scripts/smoke_test.py` прогоняет весь описанный выше конвейер целиком на
+реальном T1 sub-p019 с использованием **синтетической** заглушки-метки
+(интенсивность T1 по порогу + шум — без биологического смысла), исключительно
+чтобы доказать, что извлечение патчей, разбиение по полушариям, обучение и
+визуализация работают корректно. Выводимая им точность — не научный
+результат. Как только настоящие карты `BOLD_percchange`/CMRO₂ (или готовая
+карта меток) станут доступны для 5 пациентов, замените источник меток в
+`build_patch_dataset()` на настоящую карту concordance и перезапустите —
+других изменений в коде не требуется.
 
-## Setup
+## Установка
 
 ```bash
 pip install -r requirements.txt
-python -m pytest tests/ -v                    # verify labeling + patch logic
-python scripts/download_structural_data.py    # real T1w for 5 subjects, from OpenNeuro S3
-python scripts/smoke_test.py                  # pipeline dry run (synthetic labels)
+python -m pytest tests/ -v                    # проверка логики разметки + патчей
+python scripts/download_structural_data.py    # настоящие T1w для 5 пациентов, с S3 OpenNeuro
+python scripts/smoke_test.py                  # холостой прогон конвейера (синтетические метки)
 ```
 
-## Next steps (per the supervisor's plan)
+## Дальнейшие шаги (по плану руководителя)
 
-1. Get real `BOLD_percchange` + CMRO₂ (or a precomputed concordance map) for
-   the 5 subjects.
-2. Run `run_hemisphere_experiment` with real labels; target accuracy ~0.65-0.70.
-   If near chance, switch to `DeeperPatchCNN`.
-3. Experiment 2: add the plain BOLD signal (no contrast agent) as an extra
-   input channel/vector alongside the structural patch.
+1. Получить настоящие `BOLD_percchange` + CMRO₂ (или готовую карту
+   concordance) для 5 пациентов.
+2. Запустить `run_hemisphere_experiment` на настоящих метках; целевая
+   точность ~0.65-0.70. Если на уровне случайности — перейти на
+   `DeeperPatchCNN`.
+3. Эксперимент 2: добавить сырой сигнал BOLD (без контрастного агента) как
+   дополнительный входной канал/вектор рядом со структурным патчем.

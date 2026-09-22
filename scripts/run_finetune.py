@@ -1,16 +1,19 @@
 """
-"Fine-tuning" pass requested after the architecture-diversity result: same
-real pooled 25-subject data, but with random-flip augmentation, a cosine
-LR schedule, and 3x the epochs (45 vs 15) - a legitimate check that the
-earlier chance-level results weren't an under-training artifact - PLUS a
-real U-Net (src/model.py:PatchUNet, encoder-decoder with skip connections,
-reads its answer from the decoder's center-voxel output) alongside the
-three architectures from Experiment 1, since a plain classifier-CNN and a
-U-Net have genuinely different inductive biases (global pooling vs. dense
-skip-connected reconstruction).
+Проход «fine-tuning», запрошенный после результата эксперимента с
+разнообразием архитектур: те же реальные объединённые данные 25
+пациентов, но с аугментацией случайным отражением, косинусным
+расписанием learning rate и в 3 раза большим числом эпох (45 против 15) -
+обоснованная проверка того, что более ранние результаты на уровне
+случайного угадывания не были артефактом недообучения - ПЛЮС настоящая
+U-Net (src/model.py:PatchUNet, энкодер-декодер со skip-соединениями,
+читает свой ответ из выхода центрального вокселя декодера) наряду с
+тремя архитектурами из Эксперимента 1, поскольку обычная CNN-классификатор
+и U-Net обладают по-настоящему разными индуктивными смещениями (глобальный
+пулинг против плотной реконструкции со skip-соединениями).
 
-Patch size 15 (the "bigger context" size from the earlier extended run) so
-the U-Net's two downsample/upsample stages have room to do something.
+Размер патча 15 (размер «более широкого контекста» из более раннего
+расширенного запуска), чтобы у двух стадий даунсемплинга/апсемплинга
+U-Net было пространство для работы.
 """
 
 import os
@@ -31,8 +34,8 @@ from src.cohort import ALL_SUBJECTS
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "results", "finetune")
 PATCH_SIZE = 15
-EPOCHS = 25  # up from Experiment 1's 15 - PatchUNet costs ~12x a plain CNN per step, so this stays background-feasible
-MAX_POOLED_PER_SIDE = 3000  # post-hoc cap so PatchUNet's cost stays bounded regardless of cohort size
+EPOCHS = 25  # больше, чем 15 в Эксперименте 1 - PatchUNet стоит ~в 12 раз дороже обычной CNN на шаг, поэтому это остаётся выполнимым в фоне
+MAX_POOLED_PER_SIDE = 3000  # ограничение постфактум, чтобы стоимость PatchUNet оставалась ограниченной независимо от размера когорты
 SEED = 0
 
 ARCHITECTURES = {
@@ -53,7 +56,7 @@ def main():
         try:
             result = process_subject(sub)
         except Exception:
-            print(f"  [error] {sub}:\n{traceback.format_exc()}")
+            print(f"  [ошибка] {sub}:\n{traceback.format_exc()}")
             result = None
         if result is None:
             log.append((sub, "skipped"))
@@ -81,7 +84,7 @@ def main():
             pos_a = rng.choice(pos_a, size=MAX_POOLED_PER_SIDE, replace=False)
         if len(pos_b) > MAX_POOLED_PER_SIDE:
             pos_b = rng.choice(pos_b, size=MAX_POOLED_PER_SIDE, replace=False)
-        print(f"\n=== {contrast}: {len(pos_a)}/{len(pos_b)} voxels A/B (capped at {MAX_POOLED_PER_SIDE}/side) ===")
+        print(f"\n=== {contrast}: {len(pos_a)}/{len(pos_b)} вокселей A/B (ограничено {MAX_POOLED_PER_SIDE}/сторону) ===")
 
         for fold_name, (train_idx, test_idx) in {"A_train_B_test": (pos_a, pos_b), "B_train_A_test": (pos_b, pos_a)}.items():
             for arch_name, factory in ARCHITECTURES.items():
@@ -102,7 +105,7 @@ def main():
     with open(os.path.join(OUT_DIR, "all_results.json"), "w") as f:
         json.dump({f"{c}|{f}|{a}": r for (c, f, a), r in all_results.items()}, f, indent=1)
 
-    # summary
+    # сводка
     fig, ax = plt.subplots(figsize=(11, 5))
     keys = sorted(set((c, f) for (c, f, a) in all_results.keys()))
     x = np.arange(len(keys))
@@ -122,7 +125,7 @@ def main():
     out_path = os.path.join(OUT_DIR, "finetune_summary.png")
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
-    print(f"\nSaved {out_path}")
+    print(f"\nСохранено: {out_path}")
 
 
 if __name__ == "__main__":

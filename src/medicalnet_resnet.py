@@ -1,16 +1,17 @@
 """
-3D ResNet trunk matching Tencent/MedicalNet's architecture (Chen et al.,
-"Med3D: Transfer Learning for 3D Medical Image Analysis"), reproduced here
-(trunk only - conv1/bn1/relu/maxpool/layer1-4, no conv_seg segmentation
-head, since the released checkpoint doesn't include one) so the pretrained
-resnet_50_23dataset.pth checkpoint's state_dict loads with an exact key
-match. Dilated (not strided) layer3/layer4 by design - MedicalNet keeps
-spatial resolution higher than a standard ImageNet ResNet for segmentation,
-so a P-voxel input patch only downsamples ~8x (conv1 stride2 x maxpool
-stride2 x layer2 stride2) rather than the usual 32x.
+Ствол 3D ResNet, соответствующий архитектуре Tencent/MedicalNet (Chen et
+al., "Med3D: Transfer Learning for 3D Medical Image Analysis"),
+воспроизведённый здесь (только ствол - conv1/bn1/relu/maxpool/layer1-4,
+без сегментационной головы conv_seg, поскольку в выпущенном чекпоинте её
+нет), чтобы state_dict предобученного чекпоинта resnet_50_23dataset.pth
+загружался с точным совпадением ключей. layer3/layer4 намеренно
+dilated (а не с stride) - MedicalNet сохраняет пространственное разрешение
+выше, чем у стандартного ImageNet ResNet, для сегментации, поэтому входной
+патч из P вокселей уменьшается лишь примерно в 8 раз (conv1 stride2 x
+maxpool stride2 x layer2 stride2), а не в обычные 32 раза.
 
-conv1 takes 1 input channel already - single-channel T1 patches need no
-adaptation, unlike a typical 3-channel ImageNet backbone.
+conv1 уже принимает 1 входной канал - одноканальные T1-патчи не требуют
+адаптации, в отличие от типичного 3-канального ImageNet backbone.
 """
 
 import torch.nn as nn
@@ -47,7 +48,7 @@ class Bottleneck(nn.Module):
 
 
 class MedicalNetResNetTrunk(nn.Module):
-    """Bottleneck-ResNet50 trunk, output: (N, 2048, d, h, w) feature map."""
+    """Ствол Bottleneck-ResNet50, выход: карта признаков (N, 2048, d, h, w)."""
 
     def __init__(self, layers=(3, 4, 6, 3)):
         super().__init__()
@@ -98,11 +99,12 @@ def load_pretrained_trunk(checkpoint_path):
 
 
 def extract_backbone_features(backbone, patches, batch_size=32):
-    """patches: (N, 1, p, p, p) float32 numpy array (already intensity-
-    normalized, same as any other patch input in this repo). Runs the
-    frozen trunk + global-average-pool in eval/no_grad mode (never trained,
-    never sees gradients - only src.model.PretrainedFeatureHead trains) and
-    returns (N, 2048) float32 numpy features."""
+    """patches: numpy-массив (N, 1, p, p, p) float32 (уже нормализованный по
+    интенсивности, как и любой другой вход-патч в этом репозитории).
+    Прогоняет замороженный ствол + global-average-pool в режиме
+    eval/no_grad (никогда не обучается, никогда не видит градиенты -
+    обучается только src.model.PretrainedFeatureHead) и возвращает
+    numpy-признаки (N, 2048) float32."""
     import torch
     import numpy as np
 

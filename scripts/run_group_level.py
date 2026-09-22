@@ -1,36 +1,39 @@
 """
-A genuinely different scale of analysis, not just another filter on the
-same voxel-level prediction task: instead of "does this patient's voxel
-predict its own concordance", asks "does a real anatomical region's
-population-level tendency toward concordance or discordance correlate
-with that region's population-level structural profile" - group
-statistics across subjects, per the "different outcome variable/scale of
-analysis" option this report has flagged since the Buchel et al.
-section. One row per (Glasser parcel, hemisphere side), not per voxel or
-per subject.
+Действительно иной масштаб анализа, а не просто ещё один фильтр той же
+задачи предсказания на уровне вокселя: вместо вопроса "предсказывает ли
+воксель этого пациента свою собственную concordance" задаётся вопрос
+"коррелирует ли популяционная склонность реального анатомического региона
+к concordance или discordance с популяционным структурным профилем этого
+региона" - групповая статистика по пациентам, в рамках варианта "другая
+целевая переменная / масштаб анализа", который этот отчёт отмечал начиная
+с раздела про Buchel et al. Одна строка на (парцелла Glasser, сторона
+полушария), а не на воксель или на пациента.
 
-Per real Glasser parcel (reusing scripts/run_roi_averaged.py's exact
-per-subject ROI-averaging: raw CMRO2_task/control averaged within the
-parcel first, then one ROI percent-change; BOLD_percchange averaged
-separately), collects each subject's own ROI-level concordant/discordant
-label (only from subjects with >=20 valid voxels in that parcel), and
-requires >=MIN_SUBJECTS_PER_PARCEL contributing subjects for the parcel
-to be included at all. The parcel's group-level label is the majority
-vote across those subjects (which side does this region lean toward,
-across the population); its feature is the population-average of each
-contributing subject's own z-scored regional T1 profile (mean T1, T1
-std, log-size).
+Для каждой реальной парцеллы Glasser (переиспользуется точное
+пациент-уровневое усреднение по ROI из scripts/run_roi_averaged.py: сырые
+CMRO2_task/control сначала усредняются внутри парцеллы, затем вычисляется
+одно процентное изменение по ROI; BOLD_percchange усредняется отдельно)
+собирается собственная ROI-метка concordant/discordant каждого пациента
+(только у пациентов с >=20 валидными вокселями в этой парцелле), и для
+включения парцеллы требуется не менее MIN_SUBJECTS_PER_PARCEL
+участвующих пациентов. Групповая метка парцеллы - это результат
+голосования большинством среди этих пациентов (в какую сторону в среднем
+по популяции склоняется этот регион); её признак - это популяционное
+среднее z-нормированного регионального профиля T1 каждого участвующего
+пациента (среднее T1, std T1, логарифм размера).
 
-Classifies with RegionMLP (same architecture as run_roi_averaged.py -
-a plain feature vector, no CNN needed at the region level), split by
-hemisphere side (train on one side's parcels' group patterns, test on
-the other's - the same leakage-safe convention as everywhere else, now
-applied to regions instead of voxels).
+Классификация выполняется через RegionMLP (та же архитектура, что и в
+run_roi_averaged.py - простой вектор признаков, CNN на уровне региона не
+нужна), с разбиением по стороне полушария (обучение на групповых
+паттернах парцелл одной стороны, тест на другой - та же защищённая от
+утечки данных конвенция, что и везде, теперь применённая к регионам
+вместо вокселей).
 
-Majority-class baseline is computed and reported for every fold from the
-start (the lesson from run_roi_averaged.py's own earlier, corrected
-result - see README "methodological note" - applied here before, not
-after, a number is reported).
+Базовый уровень «большинство» вычисляется и указывается для каждого
+разбиения с самого начала (урок из собственного более раннего,
+исправленного результата run_roi_averaged.py - см. "методологическое
+примечание" в README - применённый здесь до, а не после того, как число
+уже объявлено).
 """
 
 import os
@@ -61,17 +64,18 @@ SEED = 0
 
 
 def subject_roi_rows(sub):
-    """Per-subject per-contrast per-parcel ROI label + structural feature,
-    same computation as scripts/run_roi_averaged.py (kept independent
-    rather than imported, since here per-parcel *subject-level* rows are
-    kept for later cross-subject aggregation, not pooled/trained directly)."""
+    """ROI-метка на пациента/контраст/парцеллу + структурный признак,
+    то же вычисление, что и в scripts/run_roi_averaged.py (реализовано
+    независимо, а не импортировано, поскольку здесь строки на уровне
+    парцеллы для *отдельного пациента* сохраняются для последующей
+    межпациентской агрегации, а не сразу объединяются/обучаются)."""
     try:
         result, notes = load_subject_robust(sub)
     except Exception as e:
-        print(f"  [error] {sub}: {e}")
+        print(f"  [ошибка] {sub}: {e}")
         return None
     if result is None:
-        print(f"  [skip] {sub}: {notes}")
+        print(f"  [пропуск] {sub}: {notes}")
         return None
     t1, affine, mask, cmro2, bold_pct = result
 
@@ -83,7 +87,7 @@ def subject_roi_rows(sub):
     try:
         atlas = get_subject_glasser_atlas(sub, t1_cache_path)
     except Exception as e:
-        print(f"  [skip] {sub}: atlas registration failed ({e})")
+        print(f"  [пропуск] {sub}: регистрация атласа не удалась ({e})")
         return None
     if atlas.shape != t1.shape:
         return None
@@ -93,7 +97,7 @@ def subject_roi_rows(sub):
     global_mean, global_std = t1[t1 != 0].mean(), t1[t1 != 0].std() + 1e-6
     x_idx = np.arange(t1.shape[0])
 
-    rows = {c: [] for c in CONTRASTS}  # each: (parcel_id, side, label, feat)
+    rows = {c: [] for c in CONTRASTS}  # каждый элемент: (parcel_id, side, label, feat)
     for contrast in CONTRASTS:
         if contrast not in cmro2 or "control" not in cmro2 or contrast not in bold_pct:
             continue
@@ -138,7 +142,7 @@ def subject_roi_rows(sub):
 
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
-    # per_parcel[contrast][(pid, side)] = list of (label, feat) across subjects
+    # per_parcel[contrast][(pid, side)] = список (label, feat) по всем пациентам
     per_parcel = {c: {} for c in CONTRASTS}
     log = []
     for i, sub in enumerate(ALL_SUBJECTS):
@@ -146,7 +150,7 @@ def main():
         try:
             rows = subject_roi_rows(sub)
         except Exception:
-            print(f"  [error] {sub}:\n{traceback.format_exc()}")
+            print(f"  [ошибка] {sub}:\n{traceback.format_exc()}")
             rows = None
         if rows is None:
             log.append({"subject": sub, "status": "skipped"})
@@ -161,7 +165,7 @@ def main():
     with open(os.path.join(OUT_DIR, "subject_log.json"), "w") as f:
         json.dump(log, f, indent=1, default=str)
     n_used = sum(1 for e in log if e["status"] == "used")
-    print(f"\n{n_used}/{len(ALL_SUBJECTS)} subjects contributed >=1 ROI row")
+    print(f"\n{n_used}/{len(ALL_SUBJECTS)} пациентов внесли >=1 строку ROI")
 
     all_results = {}
     for contrast in CONTRASTS:
@@ -177,7 +181,7 @@ def main():
             group_rows.append((pid, side, group_label, group_feat, len(entries)))
 
         if len(group_rows) < 20:
-            print(f"\n=== {contrast}: only {len(group_rows)} parcels with >={MIN_SUBJECTS_PER_PARCEL} subjects, skipping ===")
+            print(f"\n=== {contrast}: всего {len(group_rows)} парцелл с >={MIN_SUBJECTS_PER_PARCEL} пациентами, пропуск ===")
             continue
 
         feats = np.stack([r[3] for r in group_rows], axis=0)
@@ -186,13 +190,13 @@ def main():
         n_subj_per_parcel = [r[4] for r in group_rows]
         pos_a, pos_b = np.where(sides == "A")[0], np.where(sides == "B")[0]
         n_conc, n_disc = int((labels > 0).sum()), int((labels == 0).sum())
-        print(f"\n=== {contrast}: {len(group_rows)} parcels ({len(pos_a)} side A / {len(pos_b)} side B), "
+        print(f"\n=== {contrast}: {len(group_rows)} парцелл ({len(pos_a)} сторона A / {len(pos_b)} сторона B), "
               f"{n_conc} group-concordant / {n_disc} group-discordant, "
-              f"median subjects/parcel={int(np.median(n_subj_per_parcel))} ===")
+              f"медиана пациентов/парцеллу={int(np.median(n_subj_per_parcel))} ===")
 
         for fold_name, (train_idx, test_idx) in {"A_train_B_test": (pos_a, pos_b), "B_train_A_test": (pos_b, pos_a)}.items():
             if len(train_idx) < 10 or len(test_idx) < 10 or len(np.unique(labels[train_idx])) < 2 or len(np.unique(labels[test_idx])) < 2:
-                print(f"  {fold_name}: skipped (too few parcels or a single class)")
+                print(f"  {fold_name}: пропущено (слишком мало парцелл или один класс)")
                 continue
             test_conc_frac = labels[test_idx].mean()
             majority_baseline = max(test_conc_frac, 1 - test_conc_frac)
@@ -203,9 +207,9 @@ def main():
                 model_factory=lambda: RegionMLP(in_dim=3, hidden=16),
             )
             acc = hist["val_acc"][-1]
-            beats = "YES" if acc > majority_baseline else "no"
+            beats = "ДА" if acc > majority_baseline else "нет"
             print(f"  {fold_name}: n_train={len(train_idx)} n_test={len(test_idx)} "
-                  f"acc={acc:.3f} majority_baseline={majority_baseline:.3f} beats_baseline={beats}")
+                  f"точность={acc:.3f} базовый_уровень_большинство={majority_baseline:.3f} превышает_базовый_уровень={beats}")
             all_results[(contrast, fold_name)] = {
                 "acc": acc, "majority_baseline": majority_baseline,
                 "n_train": len(train_idx), "n_test": len(test_idx), "n_parcels": len(group_rows),
@@ -225,18 +229,18 @@ def main():
         width = 0.35
         vals = [all_results[k]["acc"] for k in keys]
         base = [all_results[k]["majority_baseline"] for k in keys]
-        ax.bar(x - width / 2, vals, width, label="model accuracy", color="#2980b9")
-        ax.bar(x + width / 2, base, width, label="majority-class baseline", color="#2980b9", alpha=0.4, hatch="//")
+        ax.bar(x - width / 2, vals, width, label="точность модели", color="#2980b9")
+        ax.bar(x + width / 2, base, width, label="базовый уровень «большинство»", color="#2980b9", alpha=0.4, hatch="//")
         ax.set_xticks(x)
         ax.set_xticklabels([f"{c}\n{f}" for c, f in keys], fontsize=9)
         ax.set_ylim(0, 1)
-        ax.set_title("Group-level (cross-subject, region-level) classification\nmodel vs. its own majority-class baseline")
+        ax.set_title("Групповая (межпациентская, на уровне региона) классификация\nмодель против своего же базового уровня «большинство»")
         ax.legend(fontsize=8)
         fig.tight_layout()
         out_path = os.path.join(OUT_DIR, "group_level_summary.png")
         fig.savefig(out_path, dpi=150)
         plt.close(fig)
-        print(f"\nSaved {out_path}")
+        print(f"\nСохранено {out_path}")
 
 
 if __name__ == "__main__":

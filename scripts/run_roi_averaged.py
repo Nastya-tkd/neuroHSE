@@ -1,35 +1,39 @@
 """
-Changes the unit of classification from voxel to real anatomical region
-(Glasser/HCP-MMP1.0 parcel), directly motivated by the Buchel et al.
-(2026) finding that most of this project's null result may be
-individual-voxel label noise, not absence of structural signal (see
-README "Independent literature context" / report section 06j-06k).
-Averaging within an anatomically real region over dozens-to-hundreds of
-voxels mechanically suppresses exactly that kind of noise (the same
-statistical logic behind why group/ROI-level neuroimaging analyses are
-more reliable than single-voxel ones) - this is the direct, cheap
-continuation of that finding, not a new hypothesis.
+Меняет единицу классификации с вокселя на настоящую анатомическую
+область (парцел Glasser/HCP-MMP1.0), напрямую мотивировано результатом
+Buchel et al. (2026) о том, что большая часть нулевого результата этого
+проекта может быть шумом меток отдельных вокселей, а не отсутствием
+структурного сигнала (см. README «Независимый литературный контекст» /
+раздел отчёта 06j-06k). Усреднение внутри анатомически настоящей области
+по десяткам-сотням вокселей механически подавляет именно этот тип шума
+(та же статистическая логика, по которой групповые/ROI-анализы в
+нейровизуализации надёжнее анализов на уровне отдельного вокселя) - это
+прямое и недорогое продолжение этого результата, а не новая гипотеза.
 
-Per subject, per contrast, per real Glasser parcel (reusing the same
-registered atlas as scripts/run_glasser.py, cached to disk): averages
-raw CMRO2_task and CMRO2_control across all valid voxels in that parcel
-before taking one ROI-level percent change (the standard way to do
-ROI-level contrasts - averaging the physiological quantity first, then
-taking one ratio, rather than averaging many noisy per-voxel ratios),
-and separately averages BOLD_percchange (no raw BOLD baseline is
-available at this dataset's processing stage, so its per-voxel percent
-change is what's averaged). ROI label = sign(mean BOLD_percchange) x
-sign(ROI CMRO2_percchange), same definition as everywhere else in this
-project, just computed on the region mean instead of a single voxel.
-Parcels with fewer than MIN_VOXELS_PER_ROI valid voxels (on their own
-hemisphere-split side) are dropped as too small/noisy an average to
-trust.
+Для каждого пациента, каждого контраста, каждого настоящего парцела
+Glasser (используется тот же зарегистрированный атлас, что и в
+scripts/run_glasser.py, кэшированный на диск): сырые CMRO2_task и
+CMRO2_control усредняются по всем валидным вокселям этого парцела перед
+вычислением одного процентного изменения на уровне ROI (стандартный
+способ вычисления контрастов на уровне ROI - сначала усредняется
+физиологическая величина, затем берётся одно отношение, а не
+усредняются много зашумлённых повоксельных отношений), и отдельно
+усредняется BOLD_percchange (сырой базовый уровень BOLD недоступен на
+этой стадии обработки датасета, поэтому усредняется его повоксельное
+процентное изменение). Метка ROI = sign(среднее BOLD_percchange) x
+sign(ROI CMRO2_percchange), то же определение, что и везде в этом
+проекте, только вычисленное по среднему области, а не по одному
+вокселю. Парцелы с числом валидных вокселей (на своей стороне разбиения
+по полушариям) меньше MIN_VOXELS_PER_ROI отбрасываются как слишком
+маленькие/зашумлённые для доверия среднему.
 
-Classifies each region from its own structural profile (mean T1, T1
-std, log-size, the same 3 features used in run_glasser.py) via
-RegionMLP - a small MLP, not a 3D CNN, since the input here is a region
-summary, not a spatial patch. Same leakage-safe hemisphere-split
-protocol (train on side A's regions, test on side B's, and vice versa).
+Классифицирует каждую область по её собственному структурному профилю
+(среднее T1, стандартное отклонение T1, логарифм размера - те же 3
+признака, что использовались в run_glasser.py) через RegionMLP - маленький
+MLP, а не 3D CNN, поскольку входными данными здесь служит сводка по
+области, а не пространственный патч. Тот же защищённый от утечки
+протокол разбиения по полушариям (обучение на областях стороны A, тест
+на стороне B, и наоборот).
 """
 
 import os
@@ -53,7 +57,7 @@ from src.glasser_atlas import get_subject_glasser_atlas, ATLAS_CACHE_DIR
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "results", "roi_averaged")
 CONTRASTS = ["calc", "mem"]
-PATCH_SIZE_MARGIN = 9  # only used for the hemisphere-split margin, no patch is extracted here
+PATCH_SIZE_MARGIN = 9  # используется только для отступа разбиения по полушариям, патчи здесь не извлекаются
 MIN_VOXELS_PER_ROI = 20
 SEED = 0
 
@@ -62,10 +66,10 @@ def process_subject(sub):
     try:
         result, notes = load_subject_robust(sub)
     except Exception as e:
-        print(f"  [error] {sub}: {e}")
+        print(f"  [ошибка] {sub}: {e}")
         return None
     if result is None:
-        print(f"  [skip] {sub}: {notes}")
+        print(f"  [пропуск] {sub}: {notes}")
         return None
     t1, affine, mask, cmro2, bold_pct = result
 
@@ -77,10 +81,10 @@ def process_subject(sub):
     try:
         atlas = get_subject_glasser_atlas(sub, t1_cache_path)
     except Exception as e:
-        print(f"  [skip] {sub}: atlas registration failed ({e})")
+        print(f"  [пропуск] {sub}: регистрация атласа не удалась ({e})")
         return None
     if atlas.shape != t1.shape:
-        print(f"  [skip] {sub}: atlas shape mismatch")
+        print(f"  [пропуск] {sub}: несовпадение формы атласа")
         return None
 
     midpoint = hemisphere_midpoint(t1.shape, axis_index=0)
@@ -156,7 +160,7 @@ def main():
         try:
             result = process_subject(sub)
         except Exception:
-            print(f"  [error] {sub}:\n{traceback.format_exc()}")
+            print(f"  [ошибка] {sub}:\n{traceback.format_exc()}")
             result = None
         if result is None:
             log.append({"subject": sub, "status": "skipped"})
@@ -172,7 +176,7 @@ def main():
     with open(os.path.join(OUT_DIR, "subject_log.json"), "w") as f:
         json.dump(log, f, indent=1, default=str)
     n_used = sum(1 for e in log if e["status"] == "used")
-    print(f"\n{n_used}/{len(ALL_SUBJECTS)} subjects contributed >=1 usable ROI")
+    print(f"\n{n_used}/{len(ALL_SUBJECTS)} пациентов внесли >=1 пригодный ROI")
 
     all_results = {}
     for contrast in CONTRASTS:
@@ -184,7 +188,7 @@ def main():
         n_subjects = len(set(np.concatenate(pooled[contrast]["subject"], axis=0).tolist()))
         pos_a, pos_b = np.where(side == "A")[0], np.where(side == "B")[0]
         n_conc, n_disc = int((labels > 0).sum()), int((labels == 0).sum())
-        print(f"\n=== {contrast}: {n_subjects} subjects, {len(pos_a)}/{len(pos_b)} ROIs A/B, {n_conc} concordant / {n_disc} discordant ===")
+        print(f"\n=== {contrast}: {n_subjects} пациентов, {len(pos_a)}/{len(pos_b)} ROI A/B, {n_conc} concordant / {n_disc} discordant ===")
 
         for fold_name, (train_idx, test_idx) in {"A_train_B_test": (pos_a, pos_b), "B_train_A_test": (pos_b, pos_a)}.items():
             _, hist, pred, probs = train_one_fold(
@@ -216,7 +220,7 @@ def main():
     out_path = os.path.join(OUT_DIR, "roi_averaged_summary.png")
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
-    print(f"\nSaved {out_path}")
+    print(f"\nСохранено: {out_path}")
 
 
 if __name__ == "__main__":

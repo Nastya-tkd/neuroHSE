@@ -1,23 +1,26 @@
 """
-Downloads baseline (control-condition) CBV (cerebral blood volume) maps,
-recovered via the same S3 version-history mechanism as everything else.
+Скачивает карты CBV (объём мозгового кровотока) для базового
+(control-условие) уровня, восстановленные тем же механизмом истории версий
+S3, что и всё остальное.
 
-Motivated directly by Alexei Ossadtchi's hypothesis (relayed via the
-user): capillary morphology/density determines a tissue's local oxygen-
-delivery properties, and this may leave a real, physically-grounded
-signature in MRI relaxation times through sub-voxel compartmental
-averaging (blood vs. tissue T1/T2 differ, so a voxel's blood-volume
-fraction measurably shifts its observed relaxation - the same physical
-mechanism BOLD/DSC imaging itself relies on), even though individual
-capillaries are far below voxel resolution. Of the maps this project has
-used, CBV (blood volume) is the more direct macroscopic proxy for
-capillary density/vascular morphology than CBF (flow) or T1 alone -
-untested until now.
+Мотивировано напрямую гипотезой Алексея Осадчего (переданной через
+пользователя): морфология/плотность капилляров определяет локальные
+свойства доставки кислорода в ткани, и это может оставлять реальный,
+физически обоснованный след во временах релаксации МРТ за счёт
+внутривоксельного усреднения по компартментам (T1/T2 крови и ткани
+различаются, поэтому доля объёма крови в вокселе измеримо сдвигает
+наблюдаемую релаксацию - тот же физический механизм, на который опирается
+сама визуализация BOLD/DSC), даже несмотря на то, что отдельные капилляры
+намного меньше разрешения вокселя. Из карт, использованных в этом проекте,
+CBV (объём крови) - более прямой макроскопический proxy для плотности
+капилляров/сосудистой морфологии, чем CBF (поток) или один T1 - до сих пор
+не проверенный.
 
-Same non-circularity logic as scripts/download_cbf_oef.py: only the
-*control*-condition (baseline) CBV is used, never task-condition values -
-the concordant/discordant label is defined by the change between task
-and control, so a baseline map alone isn't part of that computation.
+Та же логика избежания цикличности, что и в scripts/download_cbf_oef.py:
+используется только CBV *control*-условия (базового уровня), никогда
+значения условия задачи - метка concordant/discordant определяется
+изменением между задачей и базовым уровнем, поэтому одна лишь базовая
+карта не участвует в этом вычислении.
 """
 
 import os

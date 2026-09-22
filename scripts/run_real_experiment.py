@@ -1,24 +1,26 @@
 """
-REAL Experiment 1: structural-only concordant/discordant classification,
-on REAL labels (not synthetic), for all 5 subjects.
+РЕАЛЬНЫЙ Эксперимент 1: классификация concordant/discordant только по
+структуре, на РЕАЛЬНЫХ метках (не синтетических), для всех 5 пациентов.
 
-Real label = sign(CMRO2_percchange) * sign(BOLD_percchange), computed from
-real CMRO2 (Fick's principle output) and real BOLD_percchange maps recovered
-via scripts/download_real_labels.py (see that script's docstring for
-provenance: CC0-licensed OpenNeuro derivatives, recovered from S3 version
-history). CMRO2_percchange = (CMRO2_task - CMRO2_control) / CMRO2_control * 100,
-exactly matching combined_pipeline.py's own computation
-(~line 10111: `percchange_CMRO2 = (task_CMRO2 - base_CMRO2) / base_CMRO2 * 100`).
+Реальная метка = sign(CMRO2_percchange) * sign(BOLD_percchange), вычислена
+по реальным CMRO2 (результат принципа Фика) и реальным картам
+BOLD_percchange, восстановленным через scripts/download_real_labels.py (см.
+docstring этого скрипта о происхождении данных: производные OpenNeuro под
+лицензией CC0, восстановлены из истории версий S3). CMRO2_percchange =
+(CMRO2_task - CMRO2_control) / CMRO2_control * 100, что в точности
+совпадает с собственным вычислением в combined_pipeline.py
+(~строка 10111: `percchange_CMRO2 = (task_CMRO2 - base_CMRO2) / base_CMRO2 * 100`).
 
-Structural input is <sub>_space-T2_desc-brain_T1w.nii.gz - the same T2-space
-brain-extracted T1w used elsewhere in the source pipeline, and critically in
-the SAME space as the CMRO2/BOLD_percchange label maps (all space-T2), so
-patch centers and label voxels line up without extra registration.
+Структурный вход - это <sub>_space-T2_desc-brain_T1w.nii.gz - тот же T1w с
+удалённым черепом в пространстве T2, что используется в остальных местах
+исходного конвейера, и, что критически важно, в ТОМ ЖЕ пространстве, что и
+карты меток CMRO2/BOLD_percchange (все в space-T2), поэтому центры патчей
+и воксели меток совпадают без дополнительной регистрации.
 
-Runs one experiment per (subject, contrast) pair - calc-vs-control and
-mem-vs-control - as a built-in replication check: if structural data really
-carries concordance information, the effect should show up in both task
-contrasts, not just one.
+Запускает один эксперимент на каждую пару (пациент, контраст) - calc-vs-control
+и mem-vs-control - в качестве встроенной проверки воспроизводимости: если
+структурные данные действительно несут информацию о concordance, эффект
+должен проявиться в обоих контрастах задачи, а не только в одном.
 """
 
 import os
@@ -49,7 +51,7 @@ def load_subject_arrays(sub):
     cmro2_control, _, _ = load_nifti(os.path.join(d, f"{sub}_task-control_space-T2_desc-orig_cmro2.nii"))
     cmro2_calc, _, _ = load_nifti(os.path.join(d, f"{sub}_task-calc_space-T2_desc-orig_cmro2.nii"))
     cmro2_mem, _, _ = load_nifti(os.path.join(d, f"{sub}_task-mem_space-T2_desc-orig_cmro2.nii"))
-    # some qmri outputs carry a trailing singleton 4th dim
+    # некоторые qmri-выходы содержат лишнее одномерное 4-е измерение
     cmro2_control = cmro2_control.squeeze()
     cmro2_calc = cmro2_calc.squeeze()
     cmro2_mem = cmro2_mem.squeeze()
@@ -98,7 +100,7 @@ def main():
             print(f"{sub} {contrast}: concordant={n_conc}, discordant={n_disc}")
 
             if min(n_conc, n_disc) < 50:
-                print(f"  [!] too few labeled voxels of one class, skipping")
+                print(f"  [!] слишком мало размеченных вокселей одного класса, пропуск")
                 continue
 
             out_dir = os.path.join(OUT_DIR, f"{sub}_{contrast}")
@@ -117,7 +119,7 @@ def main():
             all_results[(sub, contrast)] = results
             print(f"  -> {results}")
 
-    # summary plot: accuracy per subject x contrast x fold direction
+    # сводный график: точность по пациенту x контрасту x направлению разбиения
     labels_x = [f"{s}\n{c}" for (s, c) in all_results.keys()]
     a_vals = [all_results[k]["A_train_B_test"] for k in all_results]
     b_vals = [all_results[k]["B_train_A_test"] for k in all_results]
@@ -125,23 +127,23 @@ def main():
     fig, ax = plt.subplots(figsize=(12, 5))
     x = np.arange(len(labels_x))
     width = 0.35
-    ax.bar(x - width / 2, a_vals, width, label="A train / B test (left hemi -> right)", color="#8e44ad")
-    ax.bar(x + width / 2, b_vals, width, label="B train / A test (right hemi -> left)", color="#16a085")
-    ax.axhline(0.5, color="gray", linestyle=":", label="chance")
-    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="supervisor's target range")
+    ax.bar(x - width / 2, a_vals, width, label="обучение A / тест B (левое полушарие -> правое)", color="#8e44ad")
+    ax.bar(x + width / 2, b_vals, width, label="обучение B / тест A (правое полушарие -> левое)", color="#16a085")
+    ax.axhline(0.5, color="gray", linestyle=":", label="случайный уровень")
+    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="целевой диапазон научного руководителя")
     ax.set_xticks(x)
     ax.set_xticklabels(labels_x, fontsize=8)
     ax.set_ylim(0, 1)
-    ax.set_ylabel("test accuracy")
-    ax.set_title("REAL Experiment 1: structural-only concordant/discordant classification\n(real CMRO2 + BOLD_percchange labels, 5 subjects x 2 task contrasts)")
+    ax.set_ylabel("точность на тесте")
+    ax.set_title("РЕАЛЬНЫЙ Эксперимент 1: классификация concordant/discordant только по структуре\n(реальные метки CMRO2 + BOLD_percchange, 5 пациентов x 2 контраста задачи)")
     ax.legend(fontsize=8, loc="upper right")
     fig.tight_layout()
     summary_path = os.path.join(OUT_DIR, "real_experiment_summary.png")
     fig.savefig(summary_path, dpi=150)
     plt.close(fig)
-    print(f"\nSummary saved to {summary_path}")
+    print(f"\nСводка сохранена в {summary_path}")
 
-    print("\n=== class balance ===")
+    print("\n=== баланс классов ===")
     for k, (nc, nd) in class_balance.items():
         print(k, "concordant:", nc, "discordant:", nd)
 

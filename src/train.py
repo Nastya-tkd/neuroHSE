@@ -1,9 +1,10 @@
 """
-Experiment 1 (single subject, structural data only): train a small 3D CNN on
-patches from one half of the brain (e.g. left hemisphere) to predict
-concordant vs discordant, test on the other half, and repeat with the halves
-swapped. This is the leakage-safe validation scheme the supervisor asked for
-before scaling up to more subjects / adding BOLD as an extra input.
+Эксперимент 1 (один пациент, только структурные данные): обучить небольшую
+3D CNN на патчах из одной половины мозга (например, левого полушария)
+предсказывать concordant vs discordant, протестировать на другой половине,
+затем повторить с половинами, поменянными местами. Это защищённая от
+утечки схема валидации, которую попросил руководитель перед масштабированием
+на больше пациентов / добавлением BOLD как дополнительного входа.
 """
 
 import os
@@ -27,10 +28,11 @@ def _normalize_patch_intensity(patches, brain_mean, brain_std):
 
 def select_labeled_coords(label_volume, brain_mask, max_voxels=None, seed=0):
     """
-    Coordinates + labels only, no patches (cheap - patch extraction is what
-    was blowing up memory when done for every one of a subject's ~150k+
-    labeled voxels instead of just the handful actually trained/tested on).
-    Returns coords (N,3) int array, labels (N,) float32 in {0,1}.
+    Только координаты + метки, без патчей (дёшево - извлечение патчей было
+    тем, что разрывало память при выполнении для каждого из ~150k+ размеченных
+    вокселей пациента вместо лишь той небольшой части, что реально
+    используется для обучения/теста). Возвращает coords - целочисленный
+    массив (N,3), labels - массив (N,) float32 со значениями {0,1}.
     """
     coords = labeled_voxel_coords(label_volume, brain_mask)
     if max_voxels is not None and len(coords) > max_voxels:
@@ -43,7 +45,7 @@ def select_labeled_coords(label_volume, brain_mask, max_voxels=None, seed=0):
 
 
 def extract_and_normalize_patches(t1_volume, coords, patch_size, brain_mask):
-    """patches (N,1,p,p,p) float32, intensity-normalized by whole-brain stats."""
+    """patches (N,1,p,p,p) float32, нормализованные по интенсивности статистикой всего мозга."""
     patches = extract_patches(t1_volume, coords, patch_size)
     brain_vals = t1_volume[brain_mask.astype(bool)]
     patches = _normalize_patch_intensity(patches, brain_vals.mean(), brain_vals.std())
@@ -52,14 +54,15 @@ def extract_and_normalize_patches(t1_volume, coords, patch_size, brain_mask):
 
 def extract_and_normalize_multichannel_patches(volumes, coords, patch_size, brain_mask):
     """
-    Same as extract_and_normalize_patches but for several co-registered
-    volumes at once (e.g. T1 + baseline CBF + baseline OEF), each
-    normalized independently by its own whole-brain stats before being
-    stacked as channels - the physical units and scales of T1 intensity,
-    CBF (ml/100g/min) and OEF (fraction) are wildly different, so a shared
-    normalization constant would let one channel dominate by scale alone.
-    volumes: list of (X,Y,Z) arrays, same shape, already co-registered.
-    Returns (N, C, p, p, p) float32.
+    То же самое, что extract_and_normalize_patches, но сразу для нескольких
+    совмещённых (co-registered) объёмов (например, T1 + базовый CBF +
+    базовый OEF), каждый нормализуется независимо собственной статистикой
+    всего мозга перед объединением в каналы - физические единицы и
+    масштабы интенсивности T1, CBF (мл/100г/мин) и OEF (доля) сильно
+    отличаются, так что общая константа нормализации позволила бы одному
+    каналу доминировать просто за счёт масштаба.
+    volumes: список массивов (X,Y,Z) одинаковой формы, уже совмещённых.
+    Возвращает (N, C, p, p, p) float32.
     """
     channels = []
     for vol in volumes:
@@ -71,11 +74,12 @@ def extract_and_normalize_multichannel_patches(volumes, coords, patch_size, brai
 
 def augment_patch_batch(xb, rng_state=None):
     """
-    Random flip along each spatial axis (dims 2,3,4 of (N,1,p,p,p)),
-    independently per axis, applied to the whole batch at once. Standard,
-    label-preserving augmentation for small-patch 3D CNNs: the model only
-    ever sees local patch content (never absolute position in the brain),
-    so mirroring the patch changes nothing about what the label means.
+    Случайное отражение вдоль каждой пространственной оси (измерения
+    2,3,4 из (N,1,p,p,p)), независимо по каждой оси, применяется сразу ко
+    всему батчу. Стандартная, сохраняющая метку аугментация для 3D CNN на
+    маленьких патчах: модель видит только локальное содержимое патча
+    (никогда не абсолютное положение в мозге), поэтому зеркалирование
+    патча никак не меняет смысл метки.
     """
     for dim in (2, 3, 4):
         if torch.rand(1).item() < 0.5:
@@ -138,12 +142,12 @@ def train_one_fold(train_patches, train_labels, test_patches, test_labels,
 def train_one_fold_multiclass(train_x, train_labels, test_x, test_labels,
                                n_classes, epochs=15, batch_size=32, lr=1e-3, device="cpu", seed=0,
                                model_factory=None):
-    """Same shape as train_one_fold but for >2 integer class labels
-    (0..n_classes-1) via CrossEntropyLoss - used by the
-    concordant/discordant/unreliable 3-class framing. train_labels/
-    test_labels: int64 arrays. model_factory must return a module whose
-    forward gives (N, n_classes) logits (e.g. RegionMLP(n_classes=3) or
-    any patch model with its final layer's out_features set to
+    """Та же схема, что и train_one_fold, но для >2 целочисленных меток
+    классов (0..n_classes-1) через CrossEntropyLoss - используется для
+    3-классовой постановки concordant/discordant/unreliable. train_labels/
+    test_labels: массивы int64. model_factory должна возвращать модуль, чей
+    forward даёт логиты (N, n_classes) (например, RegionMLP(n_classes=3)
+    или любую патч-модель с out_features последнего слоя, равным
     n_classes)."""
     torch.manual_seed(seed)
     model = model_factory().to(device)
@@ -196,16 +200,18 @@ def run_hemisphere_experiment(
     device="cpu", seed=0, model_factory=SimplePatchCNN,
 ):
     """
-    Runs both fold directions (side A train / side B test, and reverse) for
-    one subject, saves diagnostic plots to out_dir, and returns a results dict.
-    margin_vox defaults to patch_size // 2 (the minimum needed to guarantee
-    no train/test patch overlap across the split).
+    Прогоняет оба направления разбиения (сторона A - train / сторона B -
+    test, и наоборот) для одного пациента, сохраняет диагностические
+    графики в out_dir и возвращает словарь результатов. margin_vox по
+    умолчанию равен patch_size // 2 (минимум, необходимый, чтобы
+    гарантировать отсутствие пересечения патчей train/test по обе стороны
+    разбиения).
     """
     os.makedirs(out_dir, exist_ok=True)
     if margin_vox is None:
         margin_vox = patch_size // 2
 
-    # Coordinates + labels for every labeled voxel (cheap - no patches yet).
+    # Координаты + метки для каждого размеченного вокселя (дёшево - патчей пока нет).
     coords, labels = select_labeled_coords(label_volume, brain_mask, max_voxels=None, seed=seed)
     midpoint = hemisphere_midpoint(t1_volume.shape, axis_index)
     side_a, side_b = split_by_axis(coords, axis_index, midpoint, margin_vox)
@@ -228,8 +234,8 @@ def run_hemisphere_experiment(
             idx = rng.choice(idx, size=max_voxels_per_side, replace=False)
         return idx
 
-    # Only from here on do we extract patches - and only for the ~2*max_voxels_per_side
-    # voxels actually used, not every labeled voxel in the brain.
+    # Только начиная отсюда извлекаются патчи - и только для ~2*max_voxels_per_side
+    # реально используемых вокселей, а не для каждого размеченного вокселя в мозге.
     idx_a, idx_b = subsample(side_a), subsample(side_b)
     used_idx = np.concatenate([idx_a, idx_b])
     used_patches = extract_and_normalize_patches(t1_volume, coords[used_idx], patch_size, brain_mask)
@@ -271,15 +277,16 @@ def train_one_fold_regression(train_patches, train_targets, test_patches, test_t
                                epochs=15, batch_size=32, lr=1e-3, device="cpu", seed=0,
                                model_factory=SimplePatchCNN):
     """
-    Alternative framing to train_one_fold: regress the continuous
-    CMRO2_percchange value directly (SimplePatchCNN's raw scalar output,
-    no sigmoid) instead of classifying its sign combined with BOLD's sign.
-    Preserves magnitude information the binary concordant/discordant label
-    throws away.
+    Альтернативная к train_one_fold постановка: регрессировать непрерывное
+    значение CMRO2_percchange напрямую (сырой скалярный выход
+    SimplePatchCNN, без сигмоиды) вместо классификации его знака в
+    сочетании со знаком BOLD. Сохраняет информацию о величине, которую
+    выбрасывает бинарная метка concordant/discordant.
 
-    Targets are standardized using TRAIN-set mean/std only (no test-set
-    statistics leak into training) before fitting; reported MSE/R2 are on
-    that standardized scale, comparable directly across folds/contrasts.
+    Целевые значения стандартизуются с использованием среднего/std только
+    по ОБУЧАЮЩЕЙ выборке (статистика тестовой выборки не просачивается в
+    обучение) перед подгонкой; итоговые MSE/R2 приводятся в этой
+    стандартизованной шкале, напрямую сравнимой между разбиениями/контрастами.
     """
     torch.manual_seed(seed)
     model = model_factory().to(device)
@@ -333,10 +340,10 @@ def train_one_fold_multimodal(train_patches, train_bold, train_labels,
                                test_patches, test_bold, test_labels,
                                epochs=15, batch_size=32, lr=1e-3, device="cpu", seed=0,
                                model_factory=None, bold_len=None):
-    """Same training loop as train_one_fold, but for a two-branch (patch,
-    feature-vector) model - PatchBOLDNet (raw time series) by default, or
-    e.g. PatchBOLDConditionNet (compact per-condition features) via
-    model_factory."""
+    """Тот же цикл обучения, что и train_one_fold, но для двухветвевой
+    модели (патч, вектор признаков) - по умолчанию PatchBOLDNet (сырой
+    временной ряд), или, например, PatchBOLDConditionNet (компактные
+    признаки по условию) через model_factory."""
     torch.manual_seed(seed)
     if model_factory is None:
         model_factory = lambda: PatchBOLDNet(bold_len=bold_len or train_bold.shape[1])
@@ -393,10 +400,11 @@ def run_hemisphere_experiment_multimodal(
     device="cpu", seed=0,
 ):
     """
-    Experiment 2: same leakage-safe hemisphere-split scheme as
-    run_hemisphere_experiment, but each voxel is represented by BOTH its
-    structural patch AND its (detrended, z-scored) BOLD time series from
-    bold_4d, fed to PatchBOLDNet's two branches.
+    Эксперимент 2: та же защищённая от утечки схема разбиения по
+    полушариям, что и в run_hemisphere_experiment, но каждый воксель
+    представлен ОБОИМИ - своим структурным патчем И своим (детрендированным,
+    z-нормализованным) BOLD-временным рядом из bold_4d, подаваемыми в две
+    ветви PatchBOLDNet.
     """
     os.makedirs(out_dir, exist_ok=True)
     if margin_vox is None:

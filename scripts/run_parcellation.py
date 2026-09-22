@@ -1,21 +1,26 @@
 """
-Data-driven parcellation: a real substitute for the unobtainable Glasser
-atlas, one level up from run_extras.py's fixed geometric grid.
+Парцелляция на основе данных: реальная замена недоступного атласа
+Glasser, на шаг выше фиксированной геометрической сетки из
+run_extras.py.
 
-Instead of drawing arbitrary straight-line grid boundaries, this clusters
-each subject's own brain voxels (per hemisphere-split side, so no region
-straddles train/test) with k-means over (y, z, local T1 intensity) - the
-cluster boundaries follow that subject's actual tissue-intensity structure
-instead of a fixed grid, which is the standard approach for a data-driven
-parcellation when no group-level anatomical atlas is available. Still not
-a real anatomical atlas (no correspondence to consistent named brain
-regions across subjects, and no atlas prior at all) - reported as that,
-not oversold.
+Вместо проведения произвольных прямолинейных границ сетки здесь
+кластеризуются собственные воксели мозга каждого пациента (отдельно для
+каждой стороны разбиения по полушариям, чтобы ни одна область не
+попадала одновременно в train и test) методом k-means по (y, z,
+локальная интенсивность T1) - границы кластеров следуют за реальной
+структурой интенсивности тканей у данного пациента, а не за
+фиксированной сеткой, что является стандартным подходом к парцелляции на
+основе данных при отсутствии группового анатомического атласа. Это
+по-прежнему не настоящий анатомический атлас (нет соответствия
+устойчивым именованным областям мозга между пациентами и вообще нет
+атласного априорного знания) - и он представлен именно так, без
+преувеличений.
 
-Each labeled voxel then gets a 3-feature descriptor: its cluster's mean
-T1, T1 std, and log-size (in voxels) - the structural "neighborhood
-profile" of the region it was clustered into, fed through
-PatchBOLDConditionNet the same way covariates/coarse-region features were.
+Каждый размеченный воксель затем получает дескриптор из 3 признаков:
+среднее T1 его кластера, стандартное отклонение T1 и логарифм размера (в
+вокселях) - структурный «профиль окрестности» области, в которую он
+попал при кластеризации, подаваемый в PatchBOLDConditionNet так же, как
+раньше подавались ковариаты/признаки грубых областей.
 """
 
 import os
@@ -74,9 +79,10 @@ def build_targets(cmro2, bold_pct, mask, contrast):
 
 
 def cluster_side(t1, mask, side_mask_x, n_clusters, seed):
-    """K-means over (y, z, T1 intensity) for one hemisphere-split side.
-    Returns a full-volume int array of cluster ids (-1 outside this side's mask)
-    and {cluster_id: (mean_t1, std_t1, log_size)}."""
+    """K-means по (y, z, интенсивность T1) для одной стороны разбиения по
+    полушариям. Возвращает целочисленный массив идентификаторов кластеров
+    на весь объём (-1 вне маски этой стороны) и
+    {cluster_id: (mean_t1, std_t1, log_size)}."""
     xs = np.where(side_mask_x)[0]
     m = mask.astype(bool)
 
@@ -89,7 +95,7 @@ def cluster_side(t1, mask, side_mask_x, n_clusters, seed):
     y_norm = coords[:, 1] / t1.shape[1]
     z_norm = coords[:, 2] / t1.shape[2]
     t1_norm = (vals - vals.mean()) / (vals.std() + 1e-6)
-    features = np.stack([y_norm, z_norm, t1_norm * 0.5], axis=1)  # intensity weighted down vs spatial
+    features = np.stack([y_norm, z_norm, t1_norm * 0.5], axis=1)  # вес интенсивности снижен относительно пространственных признаков
 
     km = KMeans(n_clusters=n_clusters, random_state=seed, n_init=3).fit(features)
     labels = km.labels_
@@ -111,12 +117,12 @@ def process_subject(sub):
     try:
         download_subject_labels(sub)
     except Exception as e:
-        print(f"  [skip] {sub}: missing core files ({e})")
+        print(f"  [пропуск] {sub}: отсутствуют базовые файлы ({e})")
         return None
     try:
         t1, affine, mask, cmro2, bold_pct = load_subject_core(sub)
     except Exception as e:
-        print(f"  [skip] {sub}: failed to load core files ({e})")
+        print(f"  [пропуск] {sub}: не удалось загрузить базовые файлы ({e})")
         return None
 
     midpoint = hemisphere_midpoint(t1.shape, axis_index=0)
@@ -127,7 +133,7 @@ def process_subject(sub):
     cmap_a, stats_a = cluster_side(t1, mask, side_a_x, N_CLUSTERS, SEED)
     cmap_b, stats_b = cluster_side(t1, mask, side_b_x, N_CLUSTERS, SEED)
     if cmap_a is None or cmap_b is None:
-        print(f"  [skip] {sub}: not enough voxels to cluster")
+        print(f"  [пропуск] {sub}: недостаточно вокселей для кластеризации")
         return None
 
     global_mean, global_std = t1[t1 != 0].mean(), t1[t1 != 0].std() + 1e-6
@@ -180,7 +186,7 @@ def main():
         try:
             result = process_subject(sub)
         except Exception:
-            print(f"  [error] {sub}:\n{traceback.format_exc()}")
+            print(f"  [ошибка] {sub}:\n{traceback.format_exc()}")
             result = None
         if result is None:
             log.append((sub, "skipped"))
@@ -202,7 +208,7 @@ def main():
         labels = np.concatenate(pooled[contrast]["labels"], axis=0)
         side = np.concatenate(pooled[contrast]["side"], axis=0)
         pos_a, pos_b = np.where(side == "A")[0], np.where(side == "B")[0]
-        print(f"\n=== {contrast}: {len(pos_a)}/{len(pos_b)} voxels A/B ===")
+        print(f"\n=== {contrast}: {len(pos_a)}/{len(pos_b)} вокселей A/B ===")
 
         for fold_name, (train_idx, test_idx) in {"A_train_B_test": (pos_a, pos_b), "B_train_A_test": (pos_b, pos_a)}.items():
             _, hist, pred, probs = train_one_fold_multimodal(
@@ -235,7 +241,7 @@ def main():
     out_path = os.path.join(OUT_DIR, "parcellation_summary.png")
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
-    print(f"\nSaved {out_path}")
+    print(f"\nСохранено: {out_path}")
 
 
 if __name__ == "__main__":

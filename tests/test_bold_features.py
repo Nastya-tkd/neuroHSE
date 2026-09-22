@@ -28,10 +28,10 @@ def test_normalize_bold_vectors_zero_mean_unit_std():
 
 
 def test_condition_block_indices_skips_lag_and_matches_tr():
-    # one 10s "calc" block starting at t=20s, TR=2s, skip 4s of lag
+    # один 10-секундный блок "calc", начинающийся в t=20с, TR=2с, пропуск 4с задержки
     events = [(20.0, 10.0, "calc")]
     idx = condition_block_indices(events, "calc", tr=2.0, n_timepoints=20, skip_seconds=4.0)
-    # block covers t in [20,30); usable window after skip is [24,30) -> TR indices 12,13,14
+    # блок охватывает t в [20,30); рабочее окно после пропуска - [24,30) -> индексы TR 12,13,14
     assert idx == [12, 13, 14]
 
 
@@ -45,7 +45,7 @@ def test_compute_condition_features_detects_elevated_condition():
     tr = 1.0
     n_t = 30
     events = [(0.0, 10.0, "rest"), (10.0, 10.0, "calc"), (20.0, 10.0, "mem")]
-    # one voxel: baseline 100, +20% during calc (no lag skip so easy to reason about)
+    # один воксель: базовый уровень 100, +20% во время calc (без пропуска задержки для простоты рассуждений)
     series = np.full(n_t, 100.0)
     series[10:20] = 120.0
     bold_4d = series.reshape(1, 1, 1, n_t)

@@ -14,7 +14,7 @@ def test_extract_patch_edge_padding():
     patch = extract_patch(vol, (0, 0, 0), patch_size=3)
     assert patch.shape == (3, 3, 3)
     assert patch[1, 1, 1] == 1.0
-    assert patch[0, 0, 0] == 0.0  # out of bounds -> zero padded
+    assert patch[0, 0, 0] == 0.0  # за пределами массива -> дополнено нулями
 
 
 def test_split_by_axis_no_overlap_with_margin():

@@ -1,40 +1,46 @@
 """
-Directly tests the explanation raised by an independent reanalysis of
-this exact dataset's methodology: Buchel et al. (2026, eLife reviewed
-preprint / bioRxiv, "Opposing BOLD signals and oxygen metabolism largely
-arise from statistical uncertainty in metabolic estimates") re-examined
-Epp et al.'s (2025, Nat Neurosci - the source of ds004873 and this
-project's label) concordant/discordant classification and found that
-77.2% of voxels could not be robustly classified once the statistical
-uncertainty of the underlying CMRO2 estimates was accounted for - i.e.
-most individual-voxel concordant/discordant labels may not be a stable
-physiological property at all, but largely noise in the CMRO2 estimate
-flipping its sign relative to true zero.
+Напрямую проверяет объяснение, выдвинутое независимым повторным анализом
+методологии именно этого датасета: Buchel et al. (2026, рецензируемый
+препринт eLife / bioRxiv, "Opposing BOLD signals and oxygen metabolism
+largely arise from statistical uncertainty in metabolic estimates")
+повторно изучили классификацию concordant/discordant из работы Epp et
+al. (2025, Nat Neurosci - источник ds004873 и метки этого проекта) и
+обнаружили, что 77.2% вокселей не могли быть надёжно классифицированы
+после учёта статистической неопределённости лежащих в основе оценок
+CMRO2 - т.е. для большинства отдельных вокселей метка concordant/
+discordant может вообще не быть устойчивым физиологическим свойством, а
+по большей части шумом в оценке CMRO2, переворачивающим её знак
+относительно истинного нуля.
 
-If that is a major contributor to this project's null result (152 real
-training runs, chance-level across every architecture/feature tried),
-then restricting to the voxels *least* likely to be noise-dominated
-should raise structural-only accuracy relative to the full, unfiltered
-set - even with no new features or architecture. This dataset has no
-per-voxel uncertainty/SEM map to replicate Buchel et al.'s exact
-statistical test, so a literature-standard proxy is used instead:
-|CMRO2_percchange| magnitude. A fixed-scale measurement noise floor is
-far more likely to flip the sign of a small percent change than a large
-one - the same statistical logic (not the same numbers) behind their
-filtering. This is disclosed as a proxy, not represented as a
-reproduction of their exact method.
+Если это существенный вклад в нулевой результат этого проекта (152
+реальных обучающих запуска, результат на уровне случайного угадывания
+для каждой опробованной архитектуры/набора признаков), то ограничение
+выборки вокселями, *наименее* вероятно доминируемыми шумом, должно
+повысить точность только по структурным данным относительно полного,
+нефильтрованного набора - даже без новых признаков или архитектуры. У
+этого датасета нет повоксельной карты неопределённости/SEM для точного
+воспроизведения статистического теста Buchel et al., поэтому вместо
+этого используется стандартный для литературы прокси: величина
+|CMRO2_percchange|. Шумовой порог измерения фиксированного масштаба
+гораздо вероятнее перевернёт знак небольшого процентного изменения, чем
+большого - та же статистическая логика (но не те же числа), что лежит в
+основе их фильтрации. Это явно указывается как прокси, а не выдаётся за
+воспроизведение их точного метода.
 
-Runs SimplePatchCNN (patch=9, T1-only, matching the pooled-cohort
-baseline methodology) on three inclusion sets built from the *same*
-voxels/subjects for a fair comparison, most permissive to strictest:
-  - all: every labeled voxel (this project's baseline all along)
-  - top 50%: |CMRO2_percchange| above the per-contrast median
-  - top 25%: |CMRO2_percchange| above the 75th percentile
-Percentile thresholds are computed on each contrast's whole labeled-voxel
-pool per fold's *training* side only, then applied to test as a fixed
-cutoff - test voxels are filtered by that fixed number, not by a
-percentile recomputed on the test side, so nothing about the test labels
-leaks into the threshold.
+Запускает SimplePatchCNN (patch=9, только T1, соответствует методологии
+базового уровня для объединённой когорты) на трёх наборах включения,
+построенных на *одних и тех же* вокселях/пациентах для честного
+сравнения, от самого мягкого к самому строгому:
+  - all: каждый размеченный воксель (базовый уровень этого проекта на
+    всём протяжении)
+  - top 50%: |CMRO2_percchange| выше медианы для данного контраста
+  - top 25%: |CMRO2_percchange| выше 75-го перцентиля
+Пороги по перцентилям вычисляются по всему пулу размеченных вокселей
+каждого контраста только на *обучающей* стороне разбиения, затем
+применяются к тесту как фиксированный порог - тестовые воксели
+фильтруются по этому фиксированному числу, а не по перцентилю,
+пересчитанному на тестовой стороне, поэтому никакая информация о
+тестовых метках не просачивается в порог.
 """
 
 import os
@@ -72,7 +78,7 @@ def build_label_and_reliability(cmro2, bold_pct, mask, contrast):
     valid = (cmro2_control != 0) & (cmro2_task != 0) & (bold != 0) & mask.astype(bool)
     label = np.zeros(cmro2_task.shape, dtype=np.float32)
     label[valid] = concordance_label(bold, pct)[valid]
-    reliability = np.abs(pct)  # |CMRO2_percchange| - proxy for how noise-robust the sign is
+    reliability = np.abs(pct)  # |CMRO2_percchange| - прокси устойчивости знака к шуму
     return label, reliability
 
 
@@ -80,10 +86,10 @@ def process_subject(sub):
     try:
         result, notes = load_subject_robust(sub)
     except Exception as e:
-        print(f"  [error] {sub}: {e}")
+        print(f"  [ошибка] {sub}: {e}")
         return None
     if result is None:
-        print(f"  [skip] {sub}: {notes}")
+        print(f"  [пропуск] {sub}: {notes}")
         return None
     t1, affine, mask, cmro2, bold_pct = result
 
@@ -140,7 +146,7 @@ def main():
         try:
             result = process_subject(sub)
         except Exception:
-            print(f"  [error] {sub}:\n{traceback.format_exc()}")
+            print(f"  [ошибка] {sub}:\n{traceback.format_exc()}")
             result = None
         if result is None:
             log.append({"subject": sub, "status": "skipped"})
@@ -156,7 +162,7 @@ def main():
     with open(os.path.join(OUT_DIR, "subject_log.json"), "w") as f:
         json.dump(log, f, indent=1, default=str)
     n_used = sum(1 for e in log if e["status"] == "used")
-    print(f"\n{n_used}/{len(ALL_SUBJECTS)} subjects used")
+    print(f"\n{n_used}/{len(ALL_SUBJECTS)} пациентов использовано")
 
     all_results = {}
     for contrast in CONTRASTS:
@@ -169,7 +175,7 @@ def main():
         n_subjects = len(set(np.concatenate(pooled[contrast]["subject"], axis=0).tolist()))
 
         pos_a, pos_b = np.where(side == "A")[0], np.where(side == "B")[0]
-        print(f"\n=== {contrast}: {n_subjects} subjects, {len(pos_a)}/{len(pos_b)} voxels A/B ===")
+        print(f"\n=== {contrast}: {n_subjects} пациентов, {len(pos_a)}/{len(pos_b)} вокселей A/B ===")
 
         for fold_name, (train_idx, test_idx) in {
             "A_train_B_test": (pos_a, pos_b),
@@ -181,7 +187,7 @@ def main():
                 tr_keep = train_idx[reliability[train_idx] >= threshold]
                 te_keep = test_idx[reliability[test_idx] >= threshold]
                 if len(tr_keep) < 50 or len(te_keep) < 50 or len(np.unique(labels[tr_keep])) < 2 or len(np.unique(labels[te_keep])) < 2:
-                    print(f"  {fold_name} {tier_name}: skipped (too few voxels/classes after filtering)")
+                    print(f"  {fold_name} {tier_name}: пропущено (слишком мало вокселей/классов после фильтрации)")
                     continue
 
                 _, hist, pred, probs = train_one_fold(
@@ -221,7 +227,7 @@ def main():
     out_path = os.path.join(OUT_DIR, "reliability_filtered_summary.png")
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
-    print(f"\nSaved {out_path}")
+    print(f"\nСохранено: {out_path}")
 
 
 if __name__ == "__main__":

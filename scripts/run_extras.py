@@ -1,35 +1,41 @@
 """
-Three follow-ups requested after the "paths to 0.65-0.70" report, run on
-the same 25-subject pooled cohort as scripts/run_pooled_cohort.py. All
-three reuse PatchBOLDConditionNet (structural patch + small feature
-vector) - only the feature vector changes.
+Три дополнительных эксперимента, запрошенных после отчёта "пути к 0.65-0.70",
+выполнены на той же выборке из 25 пациентов (pooled cohort), что и в
+scripts/run_pooled_cohort.py. Все три используют PatchBOLDConditionNet
+(структурный патч + небольшой вектор признаков) - меняется только вектор
+признаков.
 
-1. COVARIATES (age / Hct / sex from participants.tsv) - a real experiment.
-2. COARSE REGIONAL CONTEXT - NOT a real anatomical atlas. A genuine Glasser/
-   HCP-MMP parcellation was requested but is not obtainable in this
-   session: nilearn/NITRC/OSF (where such atlases are normally fetched
-   from) and Hugging Face are all blocked by network policy, no FSL
-   install ships one locally, and this session's GitHub code/repo search
-   is scoped to the one attached repository, not all of GitHub - so no
-   atlas file could be located or downloaded. What's implemented instead
-   is a coarse geometric grid (T1 mean/std over big anterior-posterior x
-   inferior-superior blocks, one per hemisphere-split side so no block
-   straddles train/test) - bigger spatial context than a patch, but NOT
-   anatomically informed, and reported as such rather than mislabeled.
-3. ORACLE / POSITIVE CONTROL - explicitly not a scientific result. Feeds
-   the model the real BOLD_percchange AND CMRO2_percchange values that
-   define the label directly, so accuracy near 100% is expected by
-   construction. Exists only to confirm the training pipeline itself has
-   no bug suppressing achievable accuracy - i.e. that Experiments 1-2's
-   chance-level numbers reflect an absence of structural signal, not a
-   broken training loop. Never to be read as "structure predicts CMRO2."
+1. КОВАРИАТЫ (возраст / Hct / пол из participants.tsv) - настоящий эксперимент.
+2. ГРУБЫЙ РЕГИОНАЛЬНЫЙ КОНТЕКСТ - НЕ настоящий анатомический атлас. Была
+   запрошена подлинная парцелляция Glasser/HCP-MMP, но получить её в этой
+   сессии невозможно: nilearn/NITRC/OSF (откуда такие атласы обычно
+   загружаются) и Hugging Face заблокированы сетевой политикой, ни один
+   локальный дистрибутив FSL его не поставляет, а поиск кода/репозиториев
+   GitHub в этой сессии ограничен одним подключённым репозиторием, а не
+   всем GitHub - поэтому файл атласа не удалось найти или скачать. Вместо
+   него реализована грубая геометрическая сетка (среднее/std T1 по крупным
+   блокам вдоль передне-задней x нижне-верхней осей, отдельно для каждой
+   стороны разбиения по полушариям, чтобы ни один блок не пересекал границу
+   train/test) - более широкий пространственный контекст, чем патч, но НЕ
+   анатомически обоснованный, и представлен именно так, а не под неверным
+   названием.
+3. ОРАКУЛЬНЫЙ / ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ - явно не научный результат. Модели
+   напрямую подаются реальные значения BOLD_percchange И CMRO2_percchange,
+   которые и определяют метку, поэтому точность около 100% ожидаема по
+   построению. Существует только для подтверждения того, что в самом
+   конвейере обучения нет бага, подавляющего достижимую точность - то есть
+   что показатели на уровне случайного угадывания в Экспериментах 1-2
+   отражают отсутствие структурного сигнала, а не сломанный цикл обучения.
+   Никогда не следует читать это как "структура предсказывает CMRO2".
 
-Item "pretrained 3D-MRI backbone fine-tuned here" from the same list is
-NOT attempted: pretrained 3D medical-imaging checkpoints (e.g. MedicalNet)
-are not committed to their GitHub repos (confirmed: cloned Tencent/
-MedicalNet, no .pth/.pt files, README points to Google Drive/Baidu Pan,
-both blocked). Faking "pretrained" via random init would misrepresent the
-result, so this item is skipped and reported as blocked, not attempted.
+Пункт "предобученный 3D-MRI backbone, дообученный здесь" из того же списка
+НЕ реализован: предобученные чекпоинты для 3D медицинской визуализации
+(например, MedicalNet) не закоммичены в соответствующие GitHub-репозитории
+(подтверждено: склонирован Tencent/MedicalNet, файлов .pth/.pt нет, README
+указывает на Google Drive/Baidu Pan, оба заблокированы). Имитация
+"предобученности" через случайную инициализацию исказила бы результат,
+поэтому этот пункт пропущен и указан как заблокированный, а не как
+невыполненный.
 """
 
 import os
@@ -97,8 +103,8 @@ def build_targets(cmro2, bold_pct, mask, contrast):
 
 
 def region_bin_maps(shape, side_a_x, side_b_x):
-    """Precomputes a (region_id) volume: distinct ids per (side, y_bin, z_bin)
-    so no region straddles the hemisphere split."""
+    """Заранее вычисляет объём (region_id): отдельные id для каждой (side, y_bin, z_bin),
+    чтобы ни один регион не пересекал границу разбиения по полушариям."""
     _, ny, nz = shape
     y_edges = np.linspace(0, ny, N_Y_BINS + 1)
     z_edges = np.linspace(0, nz, N_Z_BINS + 1)
@@ -108,10 +114,11 @@ def region_bin_maps(shape, side_a_x, side_b_x):
 
 
 def compute_region_stats(t1, mask, side_mask_x):
-    """side_mask_x: boolean (X,) - which x-slices belong to this side.
-    Returns dict[(y_bin,z_bin)] -> (mean, std) over T1 voxels in that
-    region AND this side, using the WHOLE side's mask (not just sampled
-    voxels) - purely structural, no label involved, so no leakage risk."""
+    """side_mask_x: булев массив (X,) - какие x-срезы относятся к этой стороне.
+    Возвращает dict[(y_bin,z_bin)] -> (mean, std) по вокселям T1 в данном
+    регионе И на данной стороне, используя маску ВСЕЙ стороны (а не только
+    сэмплированные воксели) - чисто структурно, метка не участвует, поэтому
+    риска утечки данных нет."""
     y_bin, z_bin = region_bin_maps(t1.shape, None, None)
     stats = {}
     m = mask.astype(bool)
@@ -143,16 +150,16 @@ def process_subject(sub, participants):
     try:
         download_subject_labels(sub)
     except Exception as e:
-        print(f"  [skip] {sub}: missing core files ({e})")
+        print(f"  [пропуск] {sub}: отсутствуют базовые файлы ({e})")
         return None
     if sub not in participants:
-        print(f"  [skip] {sub}: no covariate row")
+        print(f"  [пропуск] {sub}: нет строки ковариат")
         return None
 
     try:
         t1, affine, mask, cmro2, bold_pct = load_subject_core(sub)
     except Exception as e:
-        print(f"  [skip] {sub}: failed to load core files ({e})")
+        print(f"  [пропуск] {sub}: не удалось загрузить базовые файлы ({e})")
         return None
 
     midpoint = hemisphere_midpoint(t1.shape, axis_index=0)
@@ -207,14 +214,14 @@ def process_subject(sub, participants):
         pct_vals = pct[used_coords[:, 0], used_coords[:, 1], used_coords[:, 2]]
         bold_vals = bold[used_coords[:, 0], used_coords[:, 1], used_coords[:, 2]]
         oracle_feat = np.stack([bold_vals, pct_vals], axis=1).astype(np.float32)
-        # Scale-only (no mean subtraction): the label is exactly
-        # sign(bold_vals) * sign(pct_vals), so centering here would shift
-        # each column's zero-crossing away from true zero and silently
-        # flip the label for every voxel whose raw value sits between the
-        # old and new zero points - most damaging for near-zero voxels,
-        # which this dataset has many of. Dividing by std alone preserves
-        # sign exactly while still keeping the two columns on comparable
-        # scales for the network.
+        # Только масштабирование (без вычитания среднего): метка задаётся ровно
+        # как sign(bold_vals) * sign(pct_vals), поэтому центрирование здесь
+        # сместило бы точку перехода через ноль в каждом столбце от истинного
+        # нуля и незаметно перевернуло бы метку для каждого вокселя, чьё
+        # исходное значение оказалось между старой и новой точкой перехода -
+        # это особенно опасно для близких к нулю вокселей, которых в этом
+        # датасете много. Деление только на std сохраняет знак точно и при
+        # этом приводит оба столбца к сопоставимым масштабам для сети.
         oracle_feat = oracle_feat / (oracle_feat.std(axis=0) + 1e-6)
 
         out[contrast] = {
@@ -244,7 +251,7 @@ def run_variant(name, feat_key, n_features, pooled, out_dir):
                 model_factory=lambda: PatchBOLDConditionNet(n_bold_features=n_features),
             )
             acc = hist["val_acc"][-1]
-            print(f"  [{name}] {contrast} {fold_name}: acc={acc:.3f}")
+            print(f"  [{name}] {contrast} {fold_name}: точность={acc:.3f}")
             results[(contrast, fold_name)] = acc
             viz.plot_confusion_and_roc(
                 labels[test_idx], pred, probs, f"{name}: {contrast} {fold_name}",
@@ -256,7 +263,7 @@ def run_variant(name, feat_key, n_features, pooled, out_dir):
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     participants = load_participants(PARTICIPANTS_PATH)
-    print(f"Loaded {len(participants)} participant covariate rows")
+    print(f"Загружено {len(participants)} строк ковариат участников")
 
     pooled = {c: {"patches": [], "labels": [], "side": [], "covariate_feat": [], "region_feat": [], "oracle_feat": [], "subject": []} for c in CONTRASTS}
     log = []
@@ -265,7 +272,7 @@ def main():
         try:
             result = process_subject(sub, participants)
         except Exception:
-            print(f"  [error] {sub}:\n{traceback.format_exc()}")
+            print(f"  [ошибка] {sub}:\n{traceback.format_exc()}")
             result = None
         if result is None:
             log.append((sub, "skipped"))
@@ -287,7 +294,7 @@ def main():
     with open(os.path.join(OUT_DIR, "all_results.json"), "w") as f:
         json.dump({k: {f"{c}|{fo}": acc for (c, fo), acc in v.items()} for k, v in all_results.items()}, f, indent=1)
 
-    # summary plot
+    # сводный график
     fig, ax = plt.subplots(figsize=(9, 4.5))
     variants = list(all_results.keys())
     keys = sorted(set(k for v in all_results.values() for k in v.keys()))
@@ -297,20 +304,21 @@ def main():
     for i, name in enumerate(variants):
         vals = [all_results[name].get(k, np.nan) for k in keys]
         ax.bar(x + (i - 1) * width, vals, width, label=name, color=colors.get(name))
-    ax.axhline(0.5, color="gray", linestyle=":", label="chance")
-    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="target range")
+    ax.axhline(0.5, color="gray", linestyle=":", label="случайный уровень")
+    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="целевой диапазон")
     ax.set_xticks(x)
     ax.set_xticklabels([f"{c}\n{f}" for c, f in keys], fontsize=8)
     ax.set_ylim(0, 1.05)
-    ax.set_title("Covariates / coarse-region context / oracle positive control")
+    ax.set_title("Ковариаты / грубый региональный контекст / оракульный положительный контроль")
     ax.legend(fontsize=7, loc="center left", bbox_to_anchor=(1.0, 0.5))
     fig.tight_layout()
     out_path = os.path.join(OUT_DIR, "extras_summary.png")
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
-    print(f"\nSaved {out_path}")
-    print("\nNOTE: pretrained-3D-backbone item was not attempted - no accessible pretrained checkpoint "
-          "(see module docstring). oracle_positive_control is a pipeline sanity check, not a finding.")
+    print(f"\nСохранено {out_path}")
+    print("\nПРИМЕЧАНИЕ: пункт с предобученным 3D-backbone не выполнялся - нет доступного "
+          "предобученного чекпоинта (см. docstring модуля). oracle_positive_control - это "
+          "проверка работоспособности конвейера, а не научный результат.")
 
 
 if __name__ == "__main__":

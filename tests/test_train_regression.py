@@ -3,8 +3,9 @@ from src.train import train_one_fold_regression
 
 
 def test_regression_recovers_signal_better_than_chance():
-    """Patches whose mean intensity encodes the target should be learnable
-    (positive R2), same sanity-check logic as the classification smoke test."""
+    """Патчи, чья средняя интенсивность кодирует целевое значение, должны
+    быть обучаемы (положительный R2) — та же логика проверки на здравый смысл,
+    что и в smoke-тесте для классификации."""
     rng = np.random.default_rng(0)
     n = 200
     patch_size = 5

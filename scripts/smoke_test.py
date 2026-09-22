@@ -1,19 +1,21 @@
 """
-SMOKE TEST - NOT A SCIENTIFIC RESULT.
+SMOKE-ТЕСТ - НЕ НАУЧНЫЙ РЕЗУЛЬТАТ.
 
-Runs the full Experiment-1 pipeline (patch extraction -> hemisphere split ->
-train -> eval -> plots) end-to-end on the one real structural scan we
-currently have (sub-p019, T1w) so the code is proven to work before real
-concordant/discordant labels are available.
+Запускает полный конвейер Эксперимента 1 (извлечение патчей -> разбиение по
+полушариям -> обучение -> оценка -> графики) от начала до конца на
+единственном реальном структурном скане, который у нас сейчас есть
+(sub-p019, T1w), чтобы доказать работоспособность кода до появления
+реальных меток concordant/discordant.
 
-Real labels need CMRO2 (Fick's principle: CBF*OEF*CaO2) and BOLD_percchange
-maps for this subject, which have not been provided yet (see README.md,
-section "Current data status"). Since they're missing, this script instead
-builds a SYNTHETIC label from the T1 intensity itself (voxels above the
-whole-brain median intensity, plus noise, are arbitrarily called
-"concordant"). This has no biological meaning - it exists only to give the
-CNN something learnable so we can confirm patches, splits, training and
-plotting all run correctly. Do not report its accuracy as a finding.
+Для реальных меток нужны карты CMRO2 (принцип Фика: CBF*OEF*CaO2) и
+BOLD_percchange для этого пациента, которые пока не предоставлены (см.
+README.md, раздел "Текущий статус данных"). Поскольку их нет, этот скрипт
+вместо этого строит СИНТЕТИЧЕСКУЮ метку из самой интенсивности T1 (воксели
+выше медианной интенсивности по всему мозгу, плюс шум, произвольно
+называются "concordant"). Это не имеет биологического смысла - существует
+только для того, чтобы дать CNN что-то обучаемое и подтвердить, что
+патчи, разбиения, обучение и построение графиков работают корректно. Не
+представляйте её точность как научный результат.
 """
 
 import os
@@ -31,9 +33,10 @@ OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "results", "smoke_test")
 
 
 def make_synthetic_label(t1_brain, brain_mask, seed=0):
-    """Placeholder label ONLY (see module docstring): not real CMRO2/BOLD
-    concordance, just something spatially structured enough to sanity-check
-    that the CNN can learn *something* from patches."""
+    """ТОЛЬКО плейсхолдер-метка (см. docstring модуля): не реальная
+    concordance по CMRO2/BOLD, а просто что-то достаточно пространственно
+    структурированное, чтобы проверить, что CNN способна выучить *хоть
+    что-то* по патчам."""
     rng = np.random.default_rng(seed)
     brain_vals = t1_brain[brain_mask.astype(bool)]
     median = np.median(brain_vals)
@@ -53,14 +56,14 @@ def main():
 
     if t1.shape != mask.shape:
         raise ValueError(
-            f"T1 shape {t1.shape} != brain mask shape {mask.shape}; "
-            "resample one onto the other before running the real experiment."
+            f"форма T1 {t1.shape} != форме маски мозга {mask.shape}; "
+            "передискретизируйте одно в другое перед запуском реального эксперимента."
         )
 
     label = make_synthetic_label(t1, mask)
 
-    print("SMOKE TEST: synthetic label, not a real concordant/discordant map.")
-    print(f"T1 shape: {t1.shape}, labeled voxels: {int((mask > 0).sum())}")
+    print("SMOKE-ТЕСТ: синтетическая метка, а не реальная карта concordant/discordant.")
+    print(f"Форма T1: {t1.shape}, размеченных вокселей: {int((mask > 0).sum())}")
 
     results = run_hemisphere_experiment(
         t1_volume=t1,
@@ -68,14 +71,14 @@ def main():
         brain_mask=mask,
         affine=affine,
         patch_size=9,
-        axis_index=0,          # left/right split
+        axis_index=0,          # разбиение слева/справа
         max_voxels_per_side=800,
         epochs=8,
         out_dir=OUT_DIR,
         subject_name="subp019_SMOKETEST",
     )
-    print("Smoke-test fold accuracies (synthetic labels, not scientific):", results)
-    print(f"Diagnostic plots written to {OUT_DIR}")
+    print("Точность разбиений smoke-теста (синтетические метки, не научный результат):", results)
+    print(f"Диагностические графики записаны в {OUT_DIR}")
 
 
 if __name__ == "__main__":

@@ -1,8 +1,9 @@
 """
-Downloads <sub>_task-all_space-T2_filtered_func.nii.gz (FSL FEAT fully
-preprocessed BOLD - motion correction, smoothing, temporal high-pass filter
-already applied) for Experiment 2, via the same S3 version-history recovery
-as scripts/download_real_labels.py. ~270-430MB per subject.
+Скачивает <sub>_task-all_space-T2_filtered_func.nii.gz (полностью
+предобработанный FSL FEAT сигнал BOLD - уже применены коррекция движения,
+сглаживание, временной фильтр высоких частот) для эксперимента 2, тем же
+способом восстановления истории версий S3, что и
+scripts/download_real_labels.py. ~270-430 МБ на пациента.
 """
 
 import os
@@ -29,7 +30,7 @@ def download_subject_bold(subject, versions_cache_dir=VERSIONS_CACHE_DIR, data_d
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"{subject}{SUFFIX}")
     download_versioned(key, version_id, out_path)
-    print(f"{subject}: {out_path} ({last_modified})")
+    print(f"{subject}: {out_path} (изменено {last_modified})")
     return out_path
 
 

@@ -1,25 +1,27 @@
 """
-The one legitimate remaining thing to try, and explicitly the last one:
-not a new search over configurations, but a principled combination of
-architectures already established as independently null throughout this
-project (SimplePatchCNN, DeeperPatchCNN, AttentionPatchCNN, PatchUNet -
-src/model.py). Trains all four once each on the exact same leakage-safe
-hemisphere split (structural-only, T1, patch=9 - this project's
-most-used configuration, reusing scripts/run_full_cohort.py's process_
-subject unchanged), then soft-votes their predicted probabilities
-(simple average) into one ensemble prediction - a single, one-time
-procedure, not a hyperparameter search, so it does not carry the
-multiple-comparisons risk that repeatedly trying new configurations
-would.
+Единственная оставшаяся законная вещь, которую стоит попробовать, и
+явно последняя: не новый перебор конфигураций, а принципиальное
+объединение архитектур, каждая из которых уже показала независимый
+нулевой результат на протяжении этого проекта (SimplePatchCNN,
+DeeperPatchCNN, AttentionPatchCNN, PatchUNet - src/model.py). Все четыре
+обучаются по одному разу на совершенно одинаковом защищённом от утечки
+разбиении по полушариям (только структурные данные, T1, patch=9 - самая
+часто используемая конфигурация в этом проекте, повторно используется
+неизменённая process_subject из scripts/run_full_cohort.py), затем их
+предсказанные вероятности объединяются мягким голосованием (простым
+усреднением) в одно ансамблевое предсказание - однократная процедура, а
+не подбор гиперпараметров, поэтому она не несёт риска множественных
+сравнений, который присущ многократным попыткам новых конфигураций.
 
-Majority-class baseline computed and reported alongside the ensemble's
-own accuracy from the start, same discipline as every experiment since
-the ROI-averaged correction. If four independently-null architectures
-are all making uncorrelated errors, averaging them could in principle
-recover a weak shared signal that no single one could - if they are
-just all reflecting the same absence of signal, ensembling will do
-nothing, which is the expected outcome given everything else in this
-project.
+Базовый уровень «большинство» вычисляется и сообщается наряду с
+собственной точностью ансамбля с самого начала, та же дисциплина, что и
+во всех экспериментах после исправления с усреднением по ROI. Если все
+четыре независимо нулевые архитектуры делают некоррелированные ошибки,
+усреднение в принципе могло бы восстановить слабый общий сигнал, который
+не мог уловить ни один из них по отдельности - если же они просто все
+отражают одно и то же отсутствие сигнала, ансамблирование не даст
+ничего, что и является ожидаемым результатом с учётом всего остального
+в этом проекте.
 """
 
 import os
@@ -68,7 +70,7 @@ def main():
         try:
             result, notes = process_subject(sub)
         except Exception:
-            print(f"  [error] {sub}:\n{traceback.format_exc()}")
+            print(f"  [ошибка] {sub}:\n{traceback.format_exc()}")
             result = None
         if result is None:
             log.append({"subject": sub, "status": "skipped"})
@@ -83,7 +85,7 @@ def main():
     with open(os.path.join(OUT_DIR, "subject_log.json"), "w") as f:
         json.dump(log, f, indent=1, default=str)
     n_used = sum(1 for e in log if e["status"] == "used")
-    print(f"\n{n_used}/{len(ALL_SUBJECTS)} subjects used")
+    print(f"\n{n_used}/{len(ALL_SUBJECTS)} пациентов использовано")
 
     all_results = {}
     for contrast in CONTRASTS:
@@ -95,7 +97,7 @@ def main():
         n_subjects = len(set(np.concatenate(pooled[contrast]["subject"], axis=0).tolist()))
 
         pos_a, pos_b = np.where(side == "A")[0], np.where(side == "B")[0]
-        print(f"\n=== {contrast}: {n_subjects} subjects, {len(pos_a)}/{len(pos_b)} voxels A/B ===")
+        print(f"\n=== {contrast}: {n_subjects} пациентов, {len(pos_a)}/{len(pos_b)} вокселей A/B ===")
 
         for fold_name, (train_idx, test_idx) in {"A_train_B_test": (pos_a, pos_b), "B_train_A_test": (pos_b, pos_a)}.items():
             test_labels = labels[test_idx]
@@ -115,7 +117,7 @@ def main():
             ensemble_probs = np.mean(all_probs, axis=0)
             ensemble_pred = (ensemble_probs > 0.5).astype(np.float32)
             ensemble_acc = float((ensemble_pred == test_labels).mean())
-            beats = "YES" if ensemble_acc > majority_baseline else "no"
+            beats = "ДА" if ensemble_acc > majority_baseline else "нет"
             print(f"  {fold_name}: ensemble_acc={ensemble_acc:.3f} majority_baseline={majority_baseline:.3f} beats_baseline={beats}")
 
             all_results[(contrast, fold_name)] = {
@@ -147,7 +149,7 @@ def main():
     out_path = os.path.join(OUT_DIR, "ensemble_summary.png")
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
-    print(f"\nSaved {out_path}")
+    print(f"\nСохранено: {out_path}")
 
 
 if __name__ == "__main__":

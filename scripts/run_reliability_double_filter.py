@@ -1,29 +1,31 @@
 """
-Combines the two concrete findings from Buchel et al. (2026) into one
-filter, rather than testing |CMRO2_percchange| reliability alone (as
-scripts/run_reliability_filtered.py already did). Their reanalysis found
-two things: (1) most voxels' concordant/discordant sign can't be
-statistically trusted at all, and (2) *where it can be trusted*, positive
-BOLD responses were predominantly concordant with metabolism while
-discordance concentrated in negative BOLD responses - i.e. classification
-itself is more reliable for positive-BOLD voxels. Restricting to voxels
-that are both magnitude-reliable AND positive-BOLD should, if their
-account holds, isolate the subset of this dataset where the label is
-least noisy of all.
+Объединяет два конкретных результата Buchel et al. (2026) в один
+фильтр, вместо того чтобы проверять только надёжность |CMRO2_percchange|
+(как уже делал scripts/run_reliability_filtered.py). Их повторный анализ
+показал две вещи: (1) знак concordant/discordant для большинства
+вокселей вообще нельзя статистически доверять, и (2) *там, где ему можно
+доверять*, положительные ответы BOLD были преимущественно concordant с
+метаболизмом, тогда как discordant случаи концентрировались в
+отрицательных ответах BOLD - т.е. сама классификация надёжнее для
+вокселей с положительным BOLD. Ограничение выборки вокселями,
+одновременно надёжными по величине И имеющими положительный BOLD,
+должно, если их вывод верен, выделить подмножество этого датасета с
+наименее зашумлённой меткой из всех возможных.
 
-Four inclusion tiers, most to least permissive, on the same
-voxels/subjects/architecture as run_reliability_filtered.py
-(SimplePatchCNN, patch=9, T1-only) for direct comparability:
-  - all: every labeled voxel (this project's original baseline)
-  - top50pct: |CMRO2_percchange| above the per-fold training median
-    (same as the single-filter experiment, included again here for a
-    same-run reference point)
-  - positive_bold: BOLD_percchange > 0 only, no magnitude filter
-  - positive_bold_top50pct: both at once - the double filter
-Magnitude thresholds are fit on each fold's training side only, exactly
-as in run_reliability_filtered.py, so nothing about test labels leaks
-into the cutoff. The BOLD-sign filter needs no threshold (it's a fixed
-criterion, not fit from data), so it carries no such risk either way.
+Четыре уровня включения, от самого мягкого к самому строгому, на тех же
+вокселях/пациентах/архитектуре, что и в run_reliability_filtered.py
+(SimplePatchCNN, patch=9, только T1) для прямой сопоставимости:
+  - all: каждый размеченный воксель (исходный базовый уровень проекта)
+  - top50pct: |CMRO2_percchange| выше медианы обучающей части в рамках
+    разбиения (то же самое, что и в эксперименте с одним фильтром,
+    включено здесь снова как опорная точка в рамках одного запуска)
+  - positive_bold: только BOLD_percchange > 0, без фильтра по величине
+  - positive_bold_top50pct: оба условия сразу - двойной фильтр
+Пороги по величине подбираются только на обучающей части каждого
+разбиения, точно так же, как в run_reliability_filtered.py, поэтому
+никакая информация о тестовых метках не просачивается в порог. Фильтр
+по знаку BOLD не требует порога (это фиксированный критерий, а не
+подобранный по данным), поэтому он в любом случае не несёт такого риска.
 """
 
 import os
@@ -69,10 +71,10 @@ def process_subject(sub):
     try:
         result, notes = load_subject_robust(sub)
     except Exception as e:
-        print(f"  [error] {sub}: {e}")
+        print(f"  [ошибка] {sub}: {e}")
         return None
     if result is None:
-        print(f"  [skip] {sub}: {notes}")
+        print(f"  [пропуск] {sub}: {notes}")
         return None
     t1, affine, mask, cmro2, bold_pct = result
 
@@ -131,7 +133,7 @@ def main():
         try:
             result = process_subject(sub)
         except Exception:
-            print(f"  [error] {sub}:\n{traceback.format_exc()}")
+            print(f"  [ошибка] {sub}:\n{traceback.format_exc()}")
             result = None
         if result is None:
             log.append({"subject": sub, "status": "skipped"})
@@ -148,7 +150,7 @@ def main():
     with open(os.path.join(OUT_DIR, "subject_log.json"), "w") as f:
         json.dump(log, f, indent=1, default=str)
     n_used = sum(1 for e in log if e["status"] == "used")
-    print(f"\n{n_used}/{len(ALL_SUBJECTS)} subjects used")
+    print(f"\n{n_used}/{len(ALL_SUBJECTS)} пациентов использовано")
 
     all_results = {}
     for contrast in CONTRASTS:
@@ -162,7 +164,7 @@ def main():
         n_subjects = len(set(np.concatenate(pooled[contrast]["subject"], axis=0).tolist()))
 
         pos_a, pos_b = np.where(side == "A")[0], np.where(side == "B")[0]
-        print(f"\n=== {contrast}: {n_subjects} subjects, {len(pos_a)}/{len(pos_b)} voxels A/B ===")
+        print(f"\n=== {contrast}: {n_subjects} пациентов, {len(pos_a)}/{len(pos_b)} вокселей A/B ===")
 
         for fold_name, (train_idx, test_idx) in {
             "A_train_B_test": (pos_a, pos_b),
@@ -181,7 +183,7 @@ def main():
                 tr_keep = train_idx[keep_mask[train_idx]]
                 te_keep = test_idx[keep_mask[test_idx]]
                 if len(tr_keep) < 50 or len(te_keep) < 50 or len(np.unique(labels[tr_keep])) < 2 or len(np.unique(labels[te_keep])) < 2:
-                    print(f"  {fold_name} {tier_name}: skipped (too few voxels/classes after filtering)")
+                    print(f"  {fold_name} {tier_name}: пропущено (слишком мало вокселей/классов после фильтрации)")
                     continue
 
                 _, hist, pred, probs = train_one_fold(
@@ -222,7 +224,7 @@ def main():
     out_path = os.path.join(OUT_DIR, "reliability_double_filter_summary.png")
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
-    print(f"\nSaved {out_path}")
+    print(f"\nСохранено: {out_path}")
 
 
 if __name__ == "__main__":

@@ -1,26 +1,27 @@
 """
-Downloads CBF and OEF maps found alongside CMRO2 in the same derivatives
-tree, recovered via the same S3 version-history mechanism as everything
-else (see download_real_labels.py).
+Скачивает карты CBF и OEF, найденные рядом с CMRO2 в том же дереве
+derivatives, восстановленные тем же механизмом истории версий S3, что и
+всё остальное (см. download_real_labels.py).
 
-These were not part of the original label-defining file set - CMRO2 was
-already precomputed and recoverable directly, so CBF/OEF were never
-needed before. They matter now as a genuinely different kind of
-"structural" input: physiological maps (how much blood/oxygen a voxel
-receives) rather than T1 anatomical intensity.
+Они не входили в исходный набор файлов, определяющих метки - CMRO2 уже был
+предвычислен и восстанавливался напрямую, поэтому CBF/OEF раньше не
+требовались. Теперь они важны как принципиально иной вид "структурного"
+входа: физиологические карты (сколько крови/кислорода получает воксель), а
+не анатомическая интенсивность T1.
 
-Subfolder note (found when adding task-condition support): CBF exists in
-*two* derivatives subfolders per subject/condition - perf/ and qmri/ -
-with different S3 version IDs and timestamps (perf/ from the original
-2023 processing, qmri/ from a later 2026 re-run), while OEF only ever
-exists in qmri/. Since CMRO2 = CBF x OEF x CaO2 was computed by the
-pipeline from its own internal CBF, and OEF has no perf/ counterpart to
-be consistent with, this now explicitly prefers qmri/ over perf/ so CBF
-and OEF are always drawn from the same processing lineage - not left to
-whichever happened to sort first in the version map (which is what an
-earlier version of this function implicitly did, picking perf/ for CBF
-while OEF necessarily came from qmri/, an unintentional pipeline
-mismatch quietly fixed here).
+Замечание про подпапки (обнаружено при добавлении поддержки условий
+задачи): CBF существует в *двух* подпапках derivatives на пациента/условие
+- perf/ и qmri/ - с разными ID версий S3 и временными метками (perf/ из
+исходной обработки 2023 года, qmri/ из более позднего перерасчёта 2026
+года), тогда как OEF всегда существует только в qmri/. Поскольку CMRO2 =
+CBF x OEF x CaO2 вычислялся конвейером из его собственного внутреннего
+CBF, а у OEF нет пары в perf/, с которой можно было бы соотноситься,
+теперь здесь явно предпочитается qmri/ вместо perf/, чтобы CBF и OEF всегда
+брались из одной и той же ветки обработки - а не из того, что случайно
+оказалось раньше в карте версий (именно так неявно вела себя более ранняя
+версия этой функции, выбирая perf/ для CBF, тогда как OEF обязательно
+приходил из qmri/, - непреднамеренное рассогласование конвейера, тихо
+исправленное здесь).
 """
 
 import os
@@ -38,8 +39,9 @@ CBF_OEF_SUFFIXES = [
 
 
 def download_subject_cbf_oef(subject, condition="control", versions_cache_dir=VERSIONS_CACHE_DIR, data_dir=DATA_DIR):
-    """condition: 'control' (baseline, default) or 'calc'/'mem' (task-condition,
-    used by run_task_cbf_oef.py for the dynamic/task-period variant)."""
+    """condition: 'control' (базовый уровень, по умолчанию) или 'calc'/'mem'
+    (условие задачи, используется run_task_cbf_oef.py для динамического
+    варианта в период выполнения задачи)."""
     suffixes = [f"_task-{condition}_space-T2_cbf.nii", f"_task-{condition}_space-T2_oef.nii"]
     cache_path = os.path.join(versions_cache_dir, f"{subject}.json")
     version_map = get_or_build_version_map(f"ds004873/derivatives/{subject}/", cache_path)
@@ -50,7 +52,7 @@ def download_subject_cbf_oef(subject, condition="control", versions_cache_dir=VE
     for suffix in suffixes:
         matches = [k for k in version_map if k.split("/")[-1] == subject + suffix]
         if not matches:
-            print(f"  [!] no match for {subject}{suffix}")
+            print(f"  [!] совпадение для {subject}{suffix} не найдено")
             continue
         qmri_matches = [k for k in matches if "/qmri/" in k]
         key = qmri_matches[0] if qmri_matches else matches[0]

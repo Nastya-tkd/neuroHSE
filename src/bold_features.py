@@ -1,29 +1,33 @@
 """
-Experiment 2: plain BOLD signal as a per-voxel feature vector, alongside the
-structural patch.
+Эксперимент 2: простой BOLD-сигнал как вектор признаков по вокселю, наряду
+со структурным патчем.
 
-Input is <sub>_task-all_space-T2_filtered_func.nii.gz` - FSL FEAT's fully
-preprocessed functional data (motion correction, spatial smoothing, and
-temporal high-pass filtering already applied; this is the same file the
-source pipeline's own first-level GLM runs on). Deliberately NOT the
-minimally-preprocessed desc-preproc_bold alternative that also exists,
-since the supervisor specifically asked for filtered/detrended data, not
-"whatever's easiest".
+На вход подаётся <sub>_task-all_space-T2_filtered_func.nii.gz` - полностью
+предобработанные функциональные данные FSL FEAT (коррекция движения,
+пространственное сглаживание и временная фильтрация верхних частот уже
+применены; это тот же файл, на котором работает GLM первого уровня самого
+исходного конвейера). Намеренно НЕ используется минимально предобработанная
+альтернатива desc-preproc_bold, которая тоже существует, так как
+руководитель специально просил отфильтрованные/детрендированные данные, а
+не "что попроще".
 
-What this module adds on top of that: per-voxel linear detrending (a light,
-standard safety net - FEAT's high-pass filter removes slow drift in the
-frequency domain, this removes any residual linear trend in the time
-domain) and z-scoring (each voxel's own time series to zero mean/unit
-variance), so voxels with different raw signal intensity/scanner gain are
-comparable before being fed to a network - the same reasoning as
-normalizing the structural patches by whole-brain T1 statistics.
+Что этот модуль добавляет сверх этого: повоксельное линейное детрендирование
+(лёгкая, стандартная подстраховка - фильтр верхних частот FEAT убирает
+медленный дрейф в частотной области, а это убирает любой остаточный
+линейный тренд во временной области) и z-нормализация (собственный
+временной ряд каждого вокселя приводится к нулевому среднему/единичной
+дисперсии), чтобы воксели с разной исходной интенсивностью
+сигнала/усилением сканера были сопоставимы перед подачей в сеть - та же
+логика, что и при нормализации структурных патчей по статистике всего мозга
+T1.
 
-What this does NOT do: field-inhomogeneity/dropout-artifact symmetrization
-(signal loss near air-tissue boundaries, e.g. orbitofrontal/temporal
-regions) mentioned by the supervisor as a real concern for qBOLD/EPI data.
-That needs subject-specific field maps and a real distortion-correction
-step, not a generic voxel-time-series operation - flagged as an open gap
-rather than silently skipped.
+Чего этот модуль НЕ делает: симметризацию неоднородности поля/артефактов
+выпадения сигнала (потеря сигнала около границ воздух-ткань, например в
+орбитофронтальных/височных областях), упомянутую руководителем как реальную
+проблему для данных qBOLD/EPI. Для этого нужны индивидуальные карты поля
+пациента и настоящий шаг коррекции искажений, а не общая операция над
+временным рядом вокселя - отмечено как открытый пробел, а не молча
+пропущено.
 """
 
 import numpy as np
@@ -32,15 +36,15 @@ from scipy.signal import detrend
 
 def extract_bold_vectors(bold_4d, coords):
     """
-    bold_4d: (X, Y, Z, T) array.
-    coords: (N, 3) int array of voxel coordinates.
-    Returns (N, T) float32 array, one raw time series per coordinate.
+    bold_4d: массив (X, Y, Z, T).
+    coords: целочисленный массив (N, 3) координат вокселей.
+    Возвращает float32-массив (N, T), один сырой временной ряд на координату.
     """
     return bold_4d[coords[:, 0], coords[:, 1], coords[:, 2], :].astype(np.float32)
 
 
 def normalize_bold_vectors(vectors, eps=1e-6):
-    """Per-voxel linear detrend + z-score. vectors: (N, T) -> (N, T) float32."""
+    """Повоксельное линейное детрендирование + z-нормализация. vectors: (N, T) -> (N, T) float32."""
     detrended = detrend(vectors, axis=1, type="linear")
     mean = detrended.mean(axis=1, keepdims=True)
     std = detrended.std(axis=1, keepdims=True)
@@ -48,7 +52,7 @@ def normalize_bold_vectors(vectors, eps=1e-6):
 
 
 def parse_events_tsv(path):
-    """Reads a BIDS events.tsv (onset, duration, trial_type columns, seconds)."""
+    """Читает BIDS events.tsv (колонки onset, duration, trial_type, в секундах)."""
     import csv
     rows = []
     with open(path) as f:
@@ -60,12 +64,13 @@ def parse_events_tsv(path):
 
 def condition_block_indices(events, trial_type, tr, n_timepoints, skip_seconds=4.8):
     """
-    Timepoint (TR) indices falling inside blocks of `trial_type`, skipping
-    the first `skip_seconds` of each block. The skip accounts for
-    hemodynamic lag: BOLD signal takes ~4-6s to rise after a block starts,
-    so including those TRs would mix in signal from the *previous* block's
-    tail-end response - a deliberate choice, not "however it's usually
-    done" (per the supervisor's emphasis on understanding each step).
+    Индексы временных точек (TR), попадающих внутрь блоков `trial_type`, с
+    пропуском первых `skip_seconds` каждого блока. Пропуск учитывает
+    гемодинамическую задержку: BOLD-сигналу нужно ~4-6с, чтобы начать
+    нарастать после начала блока, поэтому включение этих TR подмешало бы
+    сигнал из хвоста отклика *предыдущего* блока - осознанный выбор, а не
+    "как обычно делают" (согласно акценту руководителя на понимании каждого
+    шага).
     """
     indices = []
     for onset, duration, cond in events:
@@ -79,19 +84,20 @@ def condition_block_indices(events, trial_type, tr, n_timepoints, skip_seconds=4
 
 def compute_condition_features(bold_4d, coords, events, tr, conditions=("calc", "mem", "rest"), skip_seconds=4.8):
     """
-    Per-voxel, per-condition percent signal change relative to that voxel's
-    whole-run temporal mean: for each condition, mean BOLD during that
-    condition's blocks (lag-adjusted, see condition_block_indices) minus
-    the run's grand mean, divided by the grand mean.
+    Процентное изменение сигнала по вокселю и по условию относительно
+    временного среднего этого вокселя по всему run: для каждого условия -
+    среднее значение BOLD во время блоков этого условия (с поправкой на
+    задержку, см. condition_block_indices) минус общее среднее по run,
+    делённое на общее среднее.
 
-    "rest" is used here as the label for the non-task baseline condition
-    (called "control" elsewhere in this pipeline's file naming) - the
-    events.tsv block design only has calc/mem/rest trial types, no
-    separate "control" label, and rest is the only non-task condition, so
-    this mapping is inferred rather than given explicitly - flagged here
-    rather than silently assumed.
+    "rest" используется здесь как метка условия базового уровня без задачи
+    (в других местах именования файлов этого конвейера называется
+    "control") - дизайн блоков в events.tsv содержит только типы испытаний
+    calc/mem/rest, отдельной метки "control" нет, а rest - единственное
+    условие без задачи, поэтому это соответствие выведено, а не задано явно
+    - отмечено здесь, а не принято молча как предположение.
 
-    Returns (N, len(conditions)) float32 array.
+    Возвращает float32-массив (N, len(conditions)).
     """
     series = bold_4d[coords[:, 0], coords[:, 1], coords[:, 2], :].astype(np.float64)  # (N, T)
     grand_mean = series.mean(axis=1)

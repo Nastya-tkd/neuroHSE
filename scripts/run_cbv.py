@@ -1,33 +1,36 @@
 """
-Baseline (control-condition) CBV (cerebral blood volume) as an extra input
-channel alongside T1 - the direct test of Alexei Ossadtchi's hypothesis
-that structural MRI contrasts might encode capillary/vascular morphology
-via sub-voxel partial-volume averaging (blood vs. tissue T1/T2 differ, so a
-voxel's blood-volume fraction measurably shifts its observed relaxation -
-the same physical mechanism BOLD/DSC imaging itself relies on). Of the
-physiological maps used in this project, CBV (blood volume) is the more
-direct macroscopic proxy for capillary density/vascular morphology than
-CBF (flow) or T1 intensity alone - untested until now.
+Базовый (в покое, контрольное условие) CBV (объём мозгового кровотока)
+как дополнительный входной канал наряду с T1 - прямая проверка гипотезы
+Алексея Осадчего о том, что структурные контрасты МРТ могут кодировать
+морфологию капилляров/сосудов через усреднение частичного объёма на
+субвоксельном уровне (T1/T2 крови и ткани различаются, поэтому доля
+объёма крови в вокселе измеримо сдвигает наблюдаемую релаксацию - тот же
+физический механизм, на котором основана сама визуализация BOLD/DSC).
+Среди физиологических карт, используемых в этом проекте, CBV (объём
+крови) - более прямой макроскопический прокси плотности капилляров/
+морфологии сосудов, чем CBF (поток) или одна лишь интенсивность T1 -
+до сих пор не проверявшийся.
 
-Non-circularity: only the *control*-condition (resting-state) CBV is used,
-never the task-condition value. The concordant/discordant label is defined
-by the *change* between task and control
-(sign(BOLD_percchange) x sign(CMRO2_percchange)); a baseline-only map is
-not part of that computation, so this is a genuine physiological-covariate
-experiment, not label leakage - the same logic as scripts/run_cbf_oef.py.
+Отсутствие цикличности: используется только CBV *контрольного* условия
+(состояние покоя), никогда не значение условия задачи. Метка
+concordant/discordant определяется *изменением* между условием задачи и
+контролем (sign(BOLD_percchange) x sign(CMRO2_percchange)); карта только
+базового уровня не участвует в этом вычислении, поэтому это подлинный
+эксперимент с физиологическим ковариатом, а не утечка метки - та же
+логика, что и в scripts/run_cbf_oef.py.
 
-Runs two models per contrast per fold direction, apples-to-apples on the
-exact same voxels/patches:
-  - structural-only (T1, 1 channel).
-  - structural + baseline CBV (T1+CBV, 2 channels, co-registered and
-    independently normalized per channel).
+Запускает две модели на контраст на направление разбиения, при полностью
+идентичных вокселях/патчах:
+  - только структурные данные (T1, 1 канал).
+  - структурные + базовый CBV (T1+CBV, 2 канала, совмещённые и
+    независимо нормализованные по каждому каналу).
 
-Majority-class baseline is computed and reported alongside both models'
-accuracy from the start (same discipline as every experiment since the
-ROI-averaged correction), even though this is not a filtering experiment -
-so class balance is identical between the two arms and the check is mainly
-a transparency/consistency habit rather than an expected source of
-surprise here.
+Базовый уровень «большинство» вычисляется и сообщается наряду с
+точностью обеих моделей с самого начала (та же дисциплина, что и во всех
+экспериментах после исправления с усреднением по ROI), даже несмотря на
+то что это не эксперимент с фильтрацией - поэтому баланс классов
+идентичен в обеих ветках, и эта проверка здесь скорее привычка к
+прозрачности/согласованности, чем ожидаемый источник неожиданностей.
 """
 
 import os
@@ -76,8 +79,9 @@ def build_label(cmro2, bold_pct, mask, contrast):
 
 
 def load_cbv(sub, mask, expected_shape):
-    """Baseline CBV, brain-masked and cleaned of non-finite noise outside
-    the mask (raw qmri maps aren't pre-skull-stripped)."""
+    """Базовый CBV, замаскированный по мозгу и очищенный от нефинитного
+    шума вне маски (сырые qmri-карты не проходят предварительное удаление
+    черепа)."""
     path = download_subject_cbv(sub)
     if path is None:
         return None
@@ -94,16 +98,16 @@ def process_subject(sub):
     try:
         result, notes = load_subject_robust(sub)
     except Exception as e:
-        print(f"  [error] {sub}: {e}")
+        print(f"  [ошибка] {sub}: {e}")
         return None
     if result is None:
-        print(f"  [skip] {sub}: {notes}")
+        print(f"  [пропуск] {sub}: {notes}")
         return None
     t1, affine, mask, cmro2, bold_pct = result
 
     cbv = load_cbv(sub, mask, t1.shape)
     if cbv is None:
-        print(f"  [skip] {sub}: no usable baseline CBV")
+        print(f"  [пропуск] {sub}: нет пригодного базового CBV")
         return None
 
     midpoint = hemisphere_midpoint(t1.shape, axis_index=0)
@@ -158,7 +162,7 @@ def main():
         try:
             result = process_subject(sub)
         except Exception:
-            print(f"  [error] {sub}:\n{traceback.format_exc()}")
+            print(f"  [ошибка] {sub}:\n{traceback.format_exc()}")
             result = None
         if result is None:
             log.append({"subject": sub, "status": "skipped"})
@@ -174,12 +178,12 @@ def main():
     with open(os.path.join(OUT_DIR, "subject_log.json"), "w") as f:
         json.dump(log, f, indent=1, default=str)
     n_used = sum(1 for e in log if e["status"] == "used")
-    print(f"\n{n_used}/{len(ALL_SUBJECTS)} subjects used (have baseline CBV + >=1 contrast)")
+    print(f"\n{n_used}/{len(ALL_SUBJECTS)} пациентов использовано (есть базовый CBV + >=1 контраст)")
 
     all_results = {}
     for contrast in CONTRASTS:
         if not pooled[contrast]["patches_1ch"]:
-            print(f"{contrast}: no usable subjects, skipping")
+            print(f"{contrast}: нет подходящих пациентов, пропуск")
             continue
         patches_1ch = np.concatenate(pooled[contrast]["patches_1ch"], axis=0)
         patches_2ch = np.concatenate(pooled[contrast]["patches_2ch"], axis=0)
@@ -188,7 +192,7 @@ def main():
         n_subjects = len(set(np.concatenate(pooled[contrast]["subject"], axis=0).tolist()))
 
         pos_a, pos_b = np.where(side == "A")[0], np.where(side == "B")[0]
-        print(f"\n=== {contrast}: {n_subjects} subjects, {len(pos_a)} side-A voxels, {len(pos_b)} side-B voxels ===")
+        print(f"\n=== {contrast}: {n_subjects} пациентов, {len(pos_a)} вокселей стороны A, {len(pos_b)} вокселей стороны B ===")
 
         for fold_name, (train_idx, test_idx) in {
             "A_train_B_test": (pos_a, pos_b),
@@ -210,8 +214,8 @@ def main():
             )
             acc_phys = hist_phys["val_acc"][-1]
 
-            beats = "YES" if acc_phys > majority_baseline else "no"
-            print(f"  {fold_name}: structural-only(T1)={acc_struct:.3f}  +baseline CBV={acc_phys:.3f}  "
+            beats = "ДА" if acc_phys > majority_baseline else "нет"
+            print(f"  {fold_name}: только структурные(T1)={acc_struct:.3f}  +базовый CBV={acc_phys:.3f}  "
                   f"majority_baseline={majority_baseline:.3f}  beats_baseline={beats}")
             all_results[(contrast, fold_name)] = {
                 "structural_only": acc_struct, "structural_plus_cbv": acc_phys,
@@ -248,7 +252,7 @@ def main():
     out_path = os.path.join(OUT_DIR, "cbv_summary.png")
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
-    print(f"\nSaved {out_path}")
+    print(f"\nСохранено: {out_path}")
 
 
 if __name__ == "__main__":

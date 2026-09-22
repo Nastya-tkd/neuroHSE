@@ -1,8 +1,9 @@
 """
-Simple 3D CNN for binary voxel classification (concordant vs discordant)
-from a structural-MRI patch. Deliberately small, per the supervisor's
-instruction to start simple and only go deeper (e.g. a residual/attention
-net) if accuracy on the simple model stays near chance.
+Простая 3D CNN для бинарной классификации вокселей (concordant vs discordant)
+по патчу структурной МРТ. Намеренно небольшая — по указанию руководителя
+начать с простой модели и переходить к более глубокой (например,
+residual/attention-сети) только если точность простой модели остаётся на
+уровне случайного угадывания.
 """
 
 import torch
@@ -34,17 +35,17 @@ class SimplePatchCNN(nn.Module):
         )
 
     def forward(self, x):
-        """x: (N, 1, p, p, p) -> binary logits (N,) if n_classes=1,
-        else multi-class logits (N, n_classes) - used by the 3-class
-        concordant/discordant/unreliable framing."""
+        """x: (N, 1, p, p, p) -> бинарные логиты (N,), если n_classes=1,
+        иначе многоклассовые логиты (N, n_classes) - используется для
+        3-классовой постановки concordant/discordant/unreliable."""
         x = self.features(x)
         out = self.classifier(x)
         return out.squeeze(-1) if self.n_classes == 1 else out
 
 
 class DeeperPatchCNN(nn.Module):
-    """Fallback architecture (residual blocks) for step 3 of the plan, if
-    SimplePatchCNN stays near chance accuracy."""
+    """Запасная архитектура (residual-блоки) для шага 3 плана, на случай если
+    точность SimplePatchCNN остаётся на уровне случайного угадывания."""
 
     class ResBlock(nn.Module):
         def __init__(self, c):
@@ -83,20 +84,20 @@ class DeeperPatchCNN(nn.Module):
 
 class AttentionPatchCNN(nn.Module):
     """
-    Conv encoder + transformer self-attention over the patch's spatial
-    tokens, then a classification head - the sensible adaptation of a
-    "U-Net with transformer" (like MS-DSA-NET, the FCD-segmentation model
-    from the original article) to a per-patch binary label instead of dense
-    segmentation. A real U-Net decoder reconstructs a full-resolution output
-    map, which nothing here needs (we want one label per patch, not a
-    voxel-wise map) - the decoder half would just be extra unused compute
-    and parameters, so it's dropped and only the encoder + attention +
-    pooling stays.
+    Сверточный энкодер + self-attention трансформера над пространственными
+    токенами патча, затем классификационная голова - разумная адаптация
+    идеи "U-Net с трансформером" (как в MS-DSA-NET, модели сегментации FCD
+    из исходной статьи) к задаче бинарной метки на весь патч вместо плотной
+    сегментации. Настоящий декодер U-Net восстанавливает выходную карту
+    полного разрешения, что здесь не нужно (нужна одна метка на патч, а не
+    повоксельная карта) - декодерная половина была бы лишними
+    неиспользуемыми вычислениями и параметрами, поэтому она отброшена, и
+    остаются только энкодер + attention + пулинг.
 
-    Downsamples the p x p x p patch by 4x (stride-2 convs), flattens the
-    remaining spatial grid into tokens, and lets a small transformer encoder
-    mix information across the whole patch (global receptive field) before
-    pooling to a single vector.
+    Уменьшает разрешение патча p x p x p в 4 раза (свёртки со stride=2),
+    превращает оставшуюся пространственную сетку в токены и позволяет
+    небольшому трансформер-энкодеру смешивать информацию по всему патчу
+    (глобальное рецептивное поле) перед пулингом в единый вектор.
     """
 
     def __init__(self, in_channels=1, base_channels=16, n_heads=4, n_layers=2, patch_size=9):
@@ -114,7 +115,7 @@ class AttentionPatchCNN(nn.Module):
             nn.ReLU(inplace=True),
         )
         token_dim = c * 2
-        grid = -(-patch_size // 4)  # ceil(patch_size / 4), spatial size after two stride-2 convs
+        grid = -(-patch_size // 4)  # ceil(patch_size / 4), пространственный размер после двух сверток со stride=2
         n_tokens = grid ** 3
         self.pos_embed = nn.Parameter(torch.randn(1, n_tokens, token_dim) * 0.02)
         encoder_layer = nn.TransformerEncoderLayer(
@@ -127,7 +128,7 @@ class AttentionPatchCNN(nn.Module):
         )
 
     def forward(self, x):
-        """x: (N, 1, p, p, p) -> logits (N,)"""
+        """x: (N, 1, p, p, p) -> логиты (N,)"""
         feats = self.stem(x)                          # (N, token_dim, g, g, g)
         n, c = feats.shape[0], feats.shape[1]
         tokens = feats.flatten(2).transpose(1, 2)      # (N, n_tokens, token_dim)
@@ -139,27 +140,27 @@ class AttentionPatchCNN(nn.Module):
 
 class PatchUNet(nn.Module):
     """
-    A real U-Net: convolutional encoder-decoder with skip connections,
-    trained to output a dense per-voxel map over the whole patch, not just
-    a single pooled vector like the other architectures here.
+    Настоящая U-Net: сверточный энкодер-декодер со skip-соединениями,
+    обучаемый выдавать плотную повоксельную карту по всему патчу, а не
+    просто один усреднённый вектор, как остальные архитектуры здесь.
 
-    This is a genuine architectural difference from SimplePatchCNN/
-    DeeperPatchCNN/AttentionPatchCNN, all of which collapse the patch to a
-    feature vector before ever making a spatial prediction. A U-Net instead
-    predicts densely and lets the decoder's skip connections recombine
-    fine (early-layer) and coarse (bottleneck) spatial detail at every
-    output location - the thing U-Nets are for.
+    Это подлинное архитектурное отличие от SimplePatchCNN/DeeperPatchCNN/
+    AttentionPatchCNN, которые все сворачивают патч в вектор признаков
+    прежде, чем делать какое-либо пространственное предсказание. U-Net же
+    предсказывает плотно и позволяет skip-соединениям декодера
+    пересобирать тонкие (ранние слои) и грубые (bottleneck) пространственные
+    детали в каждой выходной точке - именно для этого и нужны U-Net.
 
-    The task here is one label per patch (the label belongs to the voxel
-    at the patch's center), not a segmentation map, so there's no dense
-    ground truth to supervise most of the output with. Resolved by reading
-    off the decoder's prediction AT THE CENTER VOXEL as the classification
-    logit - training and evaluation only ever look at that one location,
-    so this is still a real classification model, just one that reaches
-    its answer through a dense, skip-connected reconstruction instead of
-    global pooling. Uses F.interpolate (not transposed-conv striding) for
-    upsampling so odd patch sizes (9, 15, ...) work without shape mismatches
-    against the encoder skip features.
+    Здесь задача - одна метка на патч (метка принадлежит вокселю в центре
+    патча), а не карта сегментации, поэтому нет плотной разметки для
+    обучения большей части выхода. Решается тем, что предсказание
+    декодера В ЦЕНТРАЛЬНОМ ВОКСЕЛЕ читается как классификационный логит -
+    обучение и оценка смотрят только на эту одну точку, так что это
+    по-прежнему настоящая классификационная модель, просто получающая
+    ответ через плотную реконструкцию со skip-соединениями, а не через
+    глобальный пулинг. Для upsampling используется F.interpolate (а не
+    транспонированная свёртка со stride), чтобы нечётные размеры патча
+    (9, 15, ...) работали без несовпадения форм со skip-признаками энкодера.
     """
 
     def __init__(self, in_channels=1, base_channels=16):
@@ -183,7 +184,7 @@ class PatchUNet(nn.Module):
         self.out_conv = nn.Conv3d(c, 1, kernel_size=1)
 
     def forward(self, x):
-        """x: (N, 1, p, p, p) -> logits (N,), read from the output map's center voxel."""
+        """x: (N, 1, p, p, p) -> логиты (N,), считанные из центрального вокселя выходной карты."""
         e1 = self.enc1(x)                              # (N, c,   p,  p,  p)
         e2 = self.enc2(self.pool(e1))                   # (N, 2c, p/2,p/2,p/2)
         b = self.bottleneck(self.pool(e2))              # (N, 4c, p/4,p/4,p/4)
@@ -202,14 +203,15 @@ class PatchUNet(nn.Module):
 
 class PatchBOLDNet(nn.Module):
     """
-    Experiment 2: structural patch + per-voxel BOLD time series, two
-    branches concatenated before the classifier head.
+    Эксперимент 2: структурный патч + BOLD-временной ряд по вокселю, две
+    ветви объединяются перед классификационной головой.
 
-    Structural branch: same small conv trunk as SimplePatchCNN.
-    BOLD branch: 1D conv stack over the time axis (a time series is a
-    different kind of signal than a 3D patch - local temporal patterns,
-    not spatial neighborhoods - so a 1D conv over time, not another 3D
-    conv, is the appropriate match), then global average pooled.
+    Структурная ветвь: тот же небольшой сверточный ствол, что и в
+    SimplePatchCNN.
+    BOLD-ветвь: стек 1D-сверток по оси времени (временной ряд - это иной
+    тип сигнала, чем 3D-патч: локальные временные паттерны, а не
+    пространственные окрестности, поэтому уместна именно 1D-свертка по
+    времени, а не ещё одна 3D-свертка), затем глобальный average pooling.
     """
 
     def __init__(self, patch_channels=1, patch_base=8, bold_base=16, bold_len=400):
@@ -251,7 +253,7 @@ class PatchBOLDNet(nn.Module):
         )
 
     def forward(self, patch, bold_vec):
-        """patch: (N, 1, p, p, p). bold_vec: (N, T). -> logits (N,)"""
+        """patch: (N, 1, p, p, p). bold_vec: (N, T). -> логиты (N,)"""
         patch_feat = self.patch_branch(patch)
         bold_feat = self.bold_branch(bold_vec.unsqueeze(1))
         combined = torch.cat([patch_feat, bold_feat], dim=1)
@@ -260,12 +262,13 @@ class PatchBOLDNet(nn.Module):
 
 class PatchBOLDConditionNet(nn.Module):
     """
-    Same idea as PatchBOLDNet, but for a compact per-condition BOLD feature
-    vector (src/bold_features.py:compute_condition_features - percent
-    signal change per task condition, a handful of numbers) instead of the
-    full raw time series. A small MLP is the appropriate match for a short,
-    already-summarized feature vector - a 1D conv (built for finding
-    patterns *along* a sequence) has nothing to do here.
+    Та же идея, что и в PatchBOLDNet, но для компактного вектора
+    BOLD-признаков по условию (src/bold_features.py:compute_condition_features
+    - процентное изменение сигнала по каждому условию задачи, несколько
+    чисел) вместо полного сырого временного ряда. Небольшой MLP - уместный
+    выбор для короткого, уже агрегированного вектора признаков - 1D-свертке
+    (созданной для поиска паттернов *вдоль* последовательности) здесь
+    делать нечего.
     """
 
     def __init__(self, patch_channels=1, patch_base=8, n_bold_features=3, bold_hidden=16):
@@ -300,7 +303,7 @@ class PatchBOLDConditionNet(nn.Module):
         )
 
     def forward(self, patch, bold_feat):
-        """patch: (N, 1, p, p, p). bold_feat: (N, n_bold_features). -> logits (N,)"""
+        """patch: (N, 1, p, p, p). bold_feat: (N, n_bold_features). -> логиты (N,)"""
         patch_feat = self.patch_branch(patch)
         bold_feat = self.bold_branch(bold_feat)
         combined = torch.cat([patch_feat, bold_feat], dim=1)
@@ -308,12 +311,14 @@ class PatchBOLDConditionNet(nn.Module):
 
 
 class PretrainedFeatureHead(nn.Module):
-    """Small MLP classifier over pre-extracted MedicalNet ResNet50 trunk
-    features (2048-dim, global-average-pooled) - trained fresh on our task,
-    the trunk itself stays frozen (feature extraction is a separate,
-    one-time step, see src/medicalnet_resnet.extract_backbone_features).
-    Plugs into src/train.py:train_one_fold like any other model_factory:
-    x is (N, 2048) instead of (N, 1, p, p, p), everything else is generic."""
+    """Небольшой MLP-классификатор поверх заранее извлечённых признаков ствола
+    MedicalNet ResNet50 (2048-мерных, после global-average-pooling) -
+    обучается заново под нашу задачу, сам ствол остаётся замороженным
+    (извлечение признаков - отдельный, разовый шаг, см.
+    src/medicalnet_resnet.extract_backbone_features).
+    Подключается в src/train.py:train_one_fold как любой другой
+    model_factory: x имеет вид (N, 2048) вместо (N, 1, p, p, p), всё
+    остальное общее."""
 
     def __init__(self, in_dim=2048, hidden=256):
         super().__init__()
@@ -332,15 +337,16 @@ class PretrainedFeatureHead(nn.Module):
 
 
 class RegionMLP(nn.Module):
-    """Small MLP over a plain feature vector - used when the unit of
-    classification is a whole anatomical region (e.g. a real Glasser
-    parcel, ROI-averaged), not a voxel patch, so there is no spatial patch
-    for a 3D CNN to look at in the first place. Same generic (N, dim) ->
-    (N,) logits interface as PretrainedFeatureHead, named separately since
-    the input here is a handful of ROI summary statistics, not deep
-    backbone features. n_classes=1 gives binary logits (as everywhere else
-    in this project); n_classes>1 gives multi-class logits (used by the
-    3-class concordant/discordant/unreliable framing)."""
+    """Небольшой MLP над простым вектором признаков - используется, когда
+    единицей классификации выступает целый анатомический регион (например,
+    реальный parcel атласа Glasser, усреднённый по ROI), а не патч
+    вокселей, так что пространственного патча для 3D CNN здесь в принципе
+    нет. Тот же общий интерфейс (N, dim) -> (N,) логитов, что и у
+    PretrainedFeatureHead, но названный отдельно, так как на входе здесь
+    несколько сводных статистик по ROI, а не глубокие признаки backbone.
+    n_classes=1 даёт бинарные логиты (как и везде в проекте); n_classes>1
+    даёт многоклассовые логиты (используется для 3-классовой постановки
+    concordant/discordant/unreliable)."""
 
     def __init__(self, in_dim=3, hidden=32, n_classes=1):
         super().__init__()

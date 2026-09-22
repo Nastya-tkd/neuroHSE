@@ -1,8 +1,9 @@
 """
-Downloads <sub>_task-all_events.tsv (task block timing: onset, duration,
-trial_type) via S3 version-history recovery, same approach as the other
-download_*.py scripts - but from the RAW dataset prefix (ds004873/sub-pXXX/),
-not derivatives/, since events.tsv lives with the raw BOLD data.
+Скачивает <sub>_task-all_events.tsv (тайминг блоков задачи: onset, duration,
+trial_type) через восстановление истории версий S3, тем же способом, что и
+остальные скрипты download_*.py - но из RAW-префикса датасета
+(ds004873/sub-pXXX/), а не derivatives/, поскольку events.tsv хранится вместе
+с исходными данными BOLD.
 """
 
 import os

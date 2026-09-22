@@ -1,22 +1,23 @@
 """
-Plotting helpers for the structural-classification experiment. Colors follow
-the same red=concordant / blue=discordant convention used in the source
-repo's own BlueRed colormap and in the supervisor's description.
+Вспомогательные функции построения графиков для эксперимента структурной
+классификации. Цвета следуют тому же соглашению red=concordant /
+blue=discordant, что используется в собственной цветовой карте BlueRed
+исходного репозитория и в описании руководителя.
 """
 
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, roc_curve, auc
 
-CONCORDANT_COLOR = "#c0392b"   # red
-DISCORDANT_COLOR = "#2471a3"   # blue
+CONCORDANT_COLOR = "#c0392b"   # красный
+DISCORDANT_COLOR = "#2471a3"   # синий
 NEUTRAL_COLOR = "#5d6d7e"
 
 
 def plot_hemisphere_split(t1_slice, coords_2d, side_a_mask, side_b_mask, midline, title, out_path):
-    """t1_slice: 2D background slice. coords_2d: (N,2) voxel coords in that
-    slice's plane. Colors voxels by which split side (or dropped margin)
-    they belong to."""
+    """t1_slice: 2D фоновый срез. coords_2d: координаты вокселей (N,2) в
+    плоскости этого среза. Раскрашивает воксели по тому, к какой стороне
+    разбиения (или отброшенному промежутку) они относятся."""
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.imshow(t1_slice.T, cmap="gray", origin="lower")
     dropped = ~(side_a_mask | side_b_mask)
@@ -34,7 +35,7 @@ def plot_hemisphere_split(t1_slice, coords_2d, side_a_mask, side_b_mask, midline
 
 
 def plot_patch_examples(patches, labels, out_path, n=8):
-    """Middle axial slice of n example patches, labeled concordant/discordant."""
+    """Средний аксиальный срез n примеров патчей, подписанных concordant/discordant."""
     n = min(n, len(patches))
     fig, axes = plt.subplots(1, n, figsize=(2 * n, 2.4))
     if n == 1:
@@ -51,7 +52,7 @@ def plot_patch_examples(patches, labels, out_path, n=8):
 
 
 def plot_training_curves(history, title, out_path):
-    """history: dict with 'train_loss', 'train_acc', 'val_acc' lists."""
+    """history: словарь со списками 'train_loss', 'train_acc', 'val_acc'."""
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(9, 3.5))
     ax1.plot(history["train_loss"], color=NEUTRAL_COLOR)
     ax1.set_title("training loss")
@@ -100,10 +101,10 @@ def plot_confusion_and_roc(y_true, y_pred, y_score, title, out_path):
 
 
 def plot_multiclass_confusion(y_true, y_pred, class_names, title, out_path):
-    """Generic n-class confusion matrix (used by the 3-class
-    concordant/discordant/unreliable framing - plot_confusion_and_roc
-    above is hardcoded to 2 classes plus an ROC curve, which doesn't
-    apply once there's a third class)."""
+    """Общая матрица ошибок для n классов (используется для 3-классовой
+    постановки concordant/discordant/unreliable - plot_confusion_and_roc
+    выше жёстко рассчитана на 2 класса плюс ROC-кривую, что не применимо,
+    когда появляется третий класс)."""
     n = len(class_names)
     fig, ax = plt.subplots(figsize=(4.2, 4.2))
     cm = confusion_matrix(y_true, y_pred, labels=list(range(n)))
@@ -122,7 +123,7 @@ def plot_multiclass_confusion(y_true, y_pred, class_names, title, out_path):
 
 
 def plot_fold_accuracy_summary(fold_results, out_path):
-    """fold_results: dict[fold_name] -> test accuracy."""
+    """fold_results: dict[fold_name] -> точность на test."""
     fig, ax = plt.subplots(figsize=(5, 3.5))
     names = list(fold_results.keys())
     accs = [fold_results[n] for n in names]
@@ -141,7 +142,7 @@ def plot_fold_accuracy_summary(fold_results, out_path):
 
 
 def plot_regression_scatter(y_true, y_pred, r2, title, out_path):
-    """Predicted vs true (standardized) CMRO2_percchange, one point per test voxel."""
+    """Предсказанное vs истинное (стандартизованное) CMRO2_percchange, одна точка на тестовый воксель."""
     fig, ax = plt.subplots(figsize=(4.5, 4.5))
     ax.scatter(y_true, y_pred, s=3, alpha=0.15, color="#8e44ad")
     lims = [min(y_true.min(), y_pred.min()), max(y_true.max(), y_pred.max())]

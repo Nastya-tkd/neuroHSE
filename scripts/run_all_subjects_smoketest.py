@@ -1,16 +1,19 @@
 """
-SMOKE TEST ACROSS ALL 5 SUBJECTS - NOT A SCIENTIFIC RESULT.
+SMOKE-ТЕСТ ПО ВСЕМ 5 ПАЦИЕНТАМ - НЕ НАУЧНЫЙ РЕЗУЛЬТАТ.
 
-Same caveat as scripts/smoke_test.py, extended to all 5 subjects we have
-real T1w for. Labels are still the synthetic T1-intensity-threshold
-placeholder (no biological meaning) because real concordant/discordant
-labels are still blocked on missing CBF/CBV/Hct data (see README.md).
+Та же оговорка, что и в scripts/smoke_test.py, распространённая на всех 5
+пациентов, для которых у нас есть реальный T1w. Метки по-прежнему остаются
+синтетическим плейсхолдером по порогу интенсивности T1 (без биологического
+смысла), потому что реальные метки concordant/discordant всё ещё
+заблокированы отсутствием данных CBF/CBV/Hct (см. README.md).
 
-This exists to show the pipeline is not a one-subject fluke - it runs
-correctly end to end on every real subject - and to produce a cross-subject
-summary plot. It does NOT show that the model can detect anything about
-concordant/discordant voxels for the reasons explained in README.md and in
-the chat: without a real label, there is nothing biological here to detect.
+Этот скрипт существует, чтобы показать, что конвейер - не случайная удача
+на одном пациенте: он корректно проходит от начала до конца на каждом
+реальном пациенте - и чтобы построить сводный график по всем пациентам.
+Он НЕ показывает, что модель способна обнаруживать что-либо о вокселях
+concordant/discordant, по причинам, объяснённым в README.md и в переписке:
+без реальной метки здесь нет ничего биологического, что можно было бы
+обнаружить.
 """
 
 import os
@@ -43,7 +46,7 @@ def main():
         mask, _, _ = load_nifti(mask_path)
         label = make_synthetic_label(t1, mask, seed=hash(sub) % (2**31))
 
-        print(f"=== {sub}: SMOKE TEST (synthetic label) ===")
+        print(f"=== {sub}: SMOKE-ТЕСТ (синтетическая метка) ===")
         results = run_hemisphere_experiment(
             t1_volume=t1,
             label_volume=label,
@@ -59,27 +62,27 @@ def main():
         all_results[sub] = results
         print(sub, results)
 
-    # cross-subject summary
+    # сводка по всем пациентам
     fig, ax = plt.subplots(figsize=(8, 4))
     subs = list(all_results.keys())
     a_vals = [all_results[s]["A_train_B_test"] for s in subs]
     b_vals = [all_results[s]["B_train_A_test"] for s in subs]
     x = np.arange(len(subs))
     width = 0.35
-    ax.bar(x - width / 2, a_vals, width, label="A train / B test", color="#8e44ad")
-    ax.bar(x + width / 2, b_vals, width, label="B train / A test", color="#16a085")
-    ax.axhline(0.5, color="gray", linestyle=":", label="chance")
+    ax.bar(x - width / 2, a_vals, width, label="обучение A / тест B", color="#8e44ad")
+    ax.bar(x + width / 2, b_vals, width, label="обучение B / тест A", color="#16a085")
+    ax.axhline(0.5, color="gray", linestyle=":", label="случайный уровень")
     ax.set_xticks(x)
     ax.set_xticklabels(subs)
     ax.set_ylim(0, 1)
-    ax.set_ylabel("test accuracy")
-    ax.set_title("SMOKE TEST (synthetic labels, not biological) - all 5 subjects")
+    ax.set_ylabel("точность на тесте")
+    ax.set_title("SMOKE-ТЕСТ (синтетические метки, не биологические) - все 5 пациентов")
     ax.legend(fontsize=8)
     fig.tight_layout()
     summary_path = os.path.join(OUT_DIR, "cross_subject_summary.png")
     fig.savefig(summary_path, dpi=150)
     plt.close(fig)
-    print(f"\nCross-subject summary saved to {summary_path}")
+    print(f"\nСводка по всем пациентам сохранена в {summary_path}")
 
 
 if __name__ == "__main__":

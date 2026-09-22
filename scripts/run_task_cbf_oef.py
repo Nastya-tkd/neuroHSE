@@ -1,34 +1,35 @@
 """
-The dynamic counterpart to run_cbf_oef.py: instead of baseline (resting)
-CBF/OEF, uses the *change* during the task itself -
-dCBF = CBF_task - CBF_control, dOEF = OEF_task - OEF_control - the
-neurovascular response to the stimulus, not the physiological "resting
-backdrop" tested before.
+Динамический аналог run_cbf_oef.py: вместо базового (в покое) CBF/OEF
+используется *изменение* непосредственно во время задачи -
+dCBF = CBF_task - CBF_control, dOEF = OEF_task - OEF_control - нейрососудистый
+ответ на стимул, а не проверенный ранее физиологический "фон покоя".
 
-IMPORTANT circularity disclosure, read before interpreting any result
-here. CMRO2 (Fick's principle) = CBF x OEF x CaO2, so
+ВАЖНОЕ раскрытие циркулярности, прочитать перед интерпретацией любого
+результата здесь. CMRO2 (принцип Фика) = CBF x OEF x CaO2, поэтому
 CMRO2_percchange = (CBF_task*OEF_task - CBF_control*OEF_control) /
-(CBF_control*OEF_control) * 100 (CaO2 cancels, assumed ~constant across
-conditions). dCBF and dOEF (as used here) are NOT algebraically the same
-quantity as CMRO2_percchange - the multiplicative/baseline-normalized
-combination is not recoverable from the two differences alone without
-also knowing the absolute CBF_control/OEF_control values - but they are
-the two physiological quantities CMRO2_percchange is built from, and are
-correlated with it in a way baseline-only CBF/OEF is not. This sits
-strictly between run_cbf_oef.py's baseline experiment (a legitimate,
-clearly non-circular covariate) and the oracle positive control in
-run_extras.py (label-defining values fed in directly, not a scientific
-result). Framed and reported as its own honest category, not as either
-of those two: if this scores near chance, that's an even stronger null
-than the baseline case (task-period signal doesn't help either, despite
-being physiologically closer to the label). If it scores well above
-chance, that must be reported as reflecting its partial algebraic
-closeness to the label - like the oracle control - not as a discovered
-structural biomarker.
+(CBF_control*OEF_control) * 100 (CaO2 сокращается, считается примерно
+постоянным между условиями). dCBF и dOEF (в том виде, как они используются
+здесь) НЕ являются алгебраически той же величиной, что и CMRO2_percchange -
+мультипликативную, нормированную на базовый уровень комбинацию невозможно
+восстановить по одним лишь двум разностям без знания абсолютных значений
+CBF_control/OEF_control - но это те две физиологические величины, из
+которых строится CMRO2_percchange, и они коррелируют с ней так, как не
+коррелирует CBF/OEF только базового уровня. Это располагается строго между
+базовым экспериментом из run_cbf_oef.py (легитимная, явно нециркулярная
+ковариата) и оракульным положительным контролем в run_extras.py (значения,
+напрямую определяющие метку, поданные без изменений, - не научный результат).
+Здесь это подаётся и описывается как отдельная, честная категория, а не как
+одно из двух вышеупомянутых: если результат окажется на уровне случайного
+угадывания, это даже более сильный нулевой результат, чем в базовом случае
+(сигнал периода задачи тоже не помогает, несмотря на физиологическую
+близость к метке). Если результат окажется заметно выше случайного уровня,
+это нужно описывать как следствие частичной алгебраической близости к
+метке - как и в случае с оракульным контролем, - а не как обнаруженный
+структурный биомаркер.
 
-Same protocol otherwise as run_cbf_oef.py: T1-only (1ch) vs.
-T1+dCBF+dOEF (3ch) SimplePatchCNN, same voxels, same leakage-safe
-hemisphere split, full available cohort.
+В остальном протокол такой же, как в run_cbf_oef.py: T1-only (1 канал) против
+T1+dCBF+dOEF (3 канала) на SimplePatchCNN, те же воксели, то же защищённое
+от утечки разбиение по полушариям, вся доступная выборка.
 """
 
 import os
@@ -96,16 +97,16 @@ def process_subject(sub):
     try:
         result, notes = load_subject_robust(sub)
     except Exception as e:
-        print(f"  [error] {sub}: {e}")
+        print(f"  [ошибка] {sub}: {e}")
         return None
     if result is None:
-        print(f"  [skip] {sub}: {notes}")
+        print(f"  [пропуск] {sub}: {notes}")
         return None
     t1, affine, mask, cmro2, bold_pct = result
 
     control_cbf_oef = load_cbf_oef_condition(sub, "control", mask, t1.shape)
     if control_cbf_oef is None:
-        print(f"  [skip] {sub}: no usable control CBF/OEF")
+        print(f"  [пропуск] {sub}: нет пригодных базовых CBF/OEF")
         return None
     cbf_control, oef_control = control_cbf_oef
 
@@ -124,7 +125,7 @@ def process_subject(sub):
 
         task_cbf_oef = load_cbf_oef_condition(sub, contrast, mask, t1.shape)
         if task_cbf_oef is None:
-            print(f"  [skip contrast] {sub} {contrast}: no usable task-condition CBF/OEF")
+            print(f"  [пропуск контраста] {sub} {contrast}: нет пригодных CBF/OEF для условия задачи")
             continue
         cbf_task, oef_task = task_cbf_oef
         d_cbf = cbf_task - cbf_control
@@ -169,7 +170,7 @@ def main():
         try:
             result = process_subject(sub)
         except Exception:
-            print(f"  [error] {sub}:\n{traceback.format_exc()}")
+            print(f"  [ошибка] {sub}:\n{traceback.format_exc()}")
             result = None
         if result is None:
             log.append({"subject": sub, "status": "skipped"})
@@ -185,12 +186,12 @@ def main():
     with open(os.path.join(OUT_DIR, "subject_log.json"), "w") as f:
         json.dump(log, f, indent=1, default=str)
     n_used = sum(1 for e in log if e["status"] == "used")
-    print(f"\n{n_used}/{len(ALL_SUBJECTS)} subjects used (have control + task CBF/OEF for >=1 contrast)")
+    print(f"\nИспользовано пациентов: {n_used}/{len(ALL_SUBJECTS)} (есть control + task CBF/OEF для >=1 контраста)")
 
     all_results = {}
     for contrast in CONTRASTS:
         if not pooled[contrast]["patches_1ch"]:
-            print(f"{contrast}: no usable subjects, skipping")
+            print(f"{contrast}: нет пригодных пациентов, пропуск")
             continue
         patches_1ch = np.concatenate(pooled[contrast]["patches_1ch"], axis=0)
         patches_3ch = np.concatenate(pooled[contrast]["patches_3ch"], axis=0)
@@ -199,7 +200,7 @@ def main():
         n_subjects = len(set(np.concatenate(pooled[contrast]["subject"], axis=0).tolist()))
 
         pos_a, pos_b = np.where(side == "A")[0], np.where(side == "B")[0]
-        print(f"\n=== {contrast}: {n_subjects} subjects, {len(pos_a)} side-A voxels, {len(pos_b)} side-B voxels ===")
+        print(f"\n=== {contrast}: {n_subjects} пациентов, {len(pos_a)} вокселей стороны A, {len(pos_b)} вокселей стороны B ===")
 
         for fold_name, (train_idx, test_idx) in {
             "A_train_B_test": (pos_a, pos_b),
@@ -218,7 +219,7 @@ def main():
             )
             acc_phys = hist_phys["val_acc"][-1]
 
-            print(f"  {fold_name}: structural-only(T1)={acc_struct:.3f}  +dynamic dCBF/dOEF={acc_phys:.3f}")
+            print(f"  {fold_name}: только структура(T1)={acc_struct:.3f}  +динамические dCBF/dOEF={acc_phys:.3f}")
             all_results[(contrast, fold_name)] = {
                 "structural_only": acc_struct, "structural_plus_dcbf_doef": acc_phys, "n_subjects": n_subjects,
             }
@@ -237,21 +238,21 @@ def main():
     fig, ax = plt.subplots(figsize=(8, 4.5))
     x = np.arange(len(labels_x))
     width = 0.35
-    ax.bar(x - width / 2, struct_vals, width, label="T1 only", color="#7f8c8d")
-    ax.bar(x + width / 2, phys_vals, width, label="T1 + task dCBF/dOEF (dynamic)", color="#e67e22")
-    ax.axhline(0.5, color="gray", linestyle=":", label="chance")
-    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="target range")
+    ax.bar(x - width / 2, struct_vals, width, label="только T1", color="#7f8c8d")
+    ax.bar(x + width / 2, phys_vals, width, label="T1 + task dCBF/dOEF (динамические)", color="#e67e22")
+    ax.axhline(0.5, color="gray", linestyle=":", label="случайный уровень")
+    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="целевой диапазон")
     ax.set_xticks(x)
     ax.set_xticklabels(labels_x, fontsize=9)
     ax.set_ylim(0, 1)
-    ax.set_ylabel("test accuracy")
-    ax.set_title("T1-only vs. T1+dynamic task-period dCBF/dOEF\n(partial algebraic closeness to the label - see script docstring)")
+    ax.set_ylabel("точность на тесте")
+    ax.set_title("Только T1 против T1+динамические dCBF/dOEF периода задачи\n(частичная алгебраическая близость к метке - см. docstring скрипта)")
     ax.legend(fontsize=8)
     fig.tight_layout()
     out_path = os.path.join(OUT_DIR, "task_cbf_oef_summary.png")
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
-    print(f"\nSaved {out_path}")
+    print(f"\nСохранено {out_path}")
 
 
 if __name__ == "__main__":

@@ -1,13 +1,15 @@
 """
-Same real labels as scripts/run_real_experiment.py (real CMRO2 + real
-BOLD_percchange, 5 subjects x 2 task contrasts), but comparing all 3
-architectures from src/model.py: SimplePatchCNN (already run, chance-level),
-DeeperPatchCNN (residual blocks), and AttentionPatchCNN (conv encoder +
-transformer self-attention, the "no decoder needed" adaptation of a
-U-Net-with-transformer to per-patch classification - see its docstring).
+Те же реальные метки, что и в scripts/run_real_experiment.py (реальные
+CMRO2 + реальные BOLD_percchange, 5 пациентов x 2 контраста задачи), но со
+сравнением всех 3 архитектур из src/model.py: SimplePatchCNN (уже
+запускалась, результат на уровне случайного угадывания), DeeperPatchCNN
+(остаточные блоки) и AttentionPatchCNN (сверточный энкодер + self-attention
+трансформера, адаптация U-Net с трансформером "без декодера" к
+классификации по патчам - см. её docstring).
 
-Per the supervisor's own contingency plan: try a deeper/attention model
-before concluding there's no structural signal to find.
+По собственному плану на случай неудачи научного руководителя: перед тем
+как сделать вывод об отсутствии структурного сигнала, попробовать более
+глубокую модель / модель с attention.
 """
 
 import os
@@ -61,7 +63,7 @@ def main():
                 all_results[(sub, contrast, arch_name)] = results
                 print(f"{sub} {contrast} {arch_name} -> {results}")
 
-    # summary: mean accuracy per architecture (averaged over both fold directions)
+    # сводка: средняя точность по каждой архитектуре (усреднённая по обоим направлениям разбиения)
     import json
     with open(os.path.join(OUT_DIR, "all_results.json"), "w") as f:
         json.dump({f"{s}|{c}|{a}": r for (s, c, a), r in all_results.items()}, f, indent=1)
@@ -73,7 +75,7 @@ def main():
             if a == arch_name:
                 accs.extend([r["A_train_B_test"], r["B_train_A_test"]])
         accs = np.array(accs)
-        print(f"{arch_name}: mean={accs.mean():.3f} std={accs.std():.3f} n={len(accs)} runs")
+        print(f"{arch_name}: mean={accs.mean():.3f} std={accs.std():.3f} n={len(accs)} прогонов")
 
     labels_x = []
     means = {a: [] for a in ARCHITECTURES}
@@ -92,18 +94,18 @@ def main():
     colors = {"DeeperPatchCNN": "#e67e22", "AttentionPatchCNN": "#2980b9"}
     for i, a in enumerate(ARCHITECTURES):
         ax.bar(x + (i - 0.5) * width, means[a], width, label=a, color=colors[a])
-    ax.axhline(0.5, color="gray", linestyle=":", label="chance")
-    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="supervisor's target range")
+    ax.axhline(0.5, color="gray", linestyle=":", label="случайный уровень")
+    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="целевой диапазон научного руководителя")
     ax.set_xticks(x)
     ax.set_xticklabels(labels_x, fontsize=8)
     ax.set_ylim(0, 1)
-    ax.set_ylabel("mean test accuracy (both fold directions)")
-    ax.set_title("DeeperPatchCNN vs AttentionPatchCNN on real labels")
+    ax.set_ylabel("средняя точность на тесте (оба направления разбиения)")
+    ax.set_title("DeeperPatchCNN vs AttentionPatchCNN на реальных метках")
     ax.legend(fontsize=8)
     fig.tight_layout()
     fig.savefig(os.path.join(OUT_DIR, "architecture_comparison.png"), dpi=150)
     plt.close(fig)
-    print(f"\nSaved {os.path.join(OUT_DIR, 'architecture_comparison.png')}")
+    print(f"\nСохранено {os.path.join(OUT_DIR, 'architecture_comparison.png')}")
 
 
 if __name__ == "__main__":

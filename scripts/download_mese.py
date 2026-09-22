@@ -1,7 +1,7 @@
 """
-Downloads the full 8-echo MESE series (+ JSON sidecars, for real EchoTime
-values) for the given subjects from OpenNeuro's S3 bucket, same approach as
-scripts/download_structural_data.py.
+Скачивает полную 8-эховую серию MESE (+ JSON-сопроводители с реальными
+значениями EchoTime) для заданных пациентов из S3-хранилища OpenNeuro, тем
+же способом, что и scripts/download_structural_data.py.
 """
 
 import os
@@ -43,4 +43,4 @@ if __name__ == "__main__":
     subjects = sys.argv[1:] or ["sub-p019", "sub-p020", "sub-p021", "sub-p023", "sub-p026"]
     for sub in subjects:
         nii_paths, tes = download_subject_mese(sub)
-        print(f"{sub}: {len(nii_paths)} echoes, TEs(ms)={tes}")
+        print(f"{sub}: {len(nii_paths)} эхо, TEs(мс)={tes}")

@@ -1,17 +1,18 @@
 """
-Item 3 of the follow-up list: age/Hct/sex as covariates alongside the
-structural patch. participants.tsv recovered via S3 version history (see
-scripts/download_real_labels.py's docstring for why the current dataset
-listing doesn't have it directly).
+Пункт 3 из списка последующих задач: возраст/Hct/пол как ковариаты наряду
+со структурным патчем. participants.tsv восстановлен через историю версий
+S3 (см. docstring scripts/download_real_labels.py о том, почему в текущем
+листинге датасета его нет напрямую).
 """
 
 import csv
 
 
 def load_participants(path):
-    """Returns {subject: {"age": float, "hct": float, "sex": 0/1}} for rows
-    with complete data (excludes EXCLUDED / missing-Hct rows automatically,
-    same criteria as src/cohort.py's ALL_SUBJECTS)."""
+    """Возвращает {subject: {"age": float, "hct": float, "sex": 0/1}} для
+    строк с полными данными (автоматически исключает строки EXCLUDED /
+    без значения Hct, те же критерии, что и в ALL_SUBJECTS из
+    src/cohort.py)."""
     out = {}
     with open(path) as f:
         for row in csv.DictReader(f, delimiter="\t"):
@@ -26,7 +27,8 @@ def load_participants(path):
 
 
 def covariate_vector(subject, participants, age_mean, age_std, hct_mean, hct_std):
-    """Per-subject [age_z, hct_z, sex] - z-scored using cohort-level stats
-    passed in (computed once over the training set, not per-voxel)."""
+    """[age_z, hct_z, sex] на пациента - z-нормализация с использованием
+    переданной статистики по когорте (вычисленной один раз по обучающей
+    выборке, не повоксельно)."""
     row = participants[subject]
     return [(row["age"] - age_mean) / age_std, (row["hct"] - hct_mean) / hct_std, row["sex"]]

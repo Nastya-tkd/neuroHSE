@@ -1,11 +1,12 @@
 """
-3D patch extraction around voxels, and leakage-safe train/test splits.
+Извлечение 3D-патчей вокруг вокселей и защищённое от утечки разбиение
+train/test.
 
-Per the supervisor's instructions: split one subject's brain into two
-independent halves (left/right hemisphere, or anterior/posterior) so that
-neighboring voxels never end up on both sides of the train/test split -
-a plain random voxel split would leak information because adjacent voxels
-share almost all of their patch.
+Согласно указаниям руководителя: разделить мозг одного пациента на две
+независимые половины (левое/правое полушарие или передняя/задняя часть),
+чтобы соседние воксели никогда не оказывались по обе стороны разбиения
+train/test - обычное случайное разбиение вокселей привело бы к утечке
+информации, поскольку соседние воксели делят почти весь свой патч.
 """
 
 import numpy as np
@@ -13,11 +14,12 @@ import numpy as np
 
 def extract_patch(volume, center, patch_size):
     """
-    Cubic patch of side `patch_size` (must be odd) centered at voxel `center`
-    = (i, j, k). Out-of-bounds edges are zero-padded.
+    Кубический патч со стороной `patch_size` (должна быть нечётной) с
+    центром в вокселе `center` = (i, j, k). Края, выходящие за границы
+    объёма, дополняются нулями.
     """
     if patch_size % 2 == 0:
-        raise ValueError("patch_size must be odd so the patch has a well-defined center")
+        raise ValueError("patch_size должен быть нечётным, чтобы у патча был чётко определённый центр")
     r = patch_size // 2
     i, j, k = center
     patch = np.zeros((patch_size, patch_size, patch_size), dtype=volume.dtype)
@@ -38,15 +40,16 @@ def extract_patch(volume, center, patch_size):
 
 
 def extract_patches(volume, centers, patch_size):
-    """centers: (N, 3) int array of voxel coordinates. Returns (N, p, p, p)."""
+    """centers: (N, 3) целочисленный массив координат вокселей. Возвращает (N, p, p, p)."""
     return np.stack([extract_patch(volume, c, patch_size) for c in centers], axis=0)
 
 
 def labeled_voxel_coords(label_mask, brain_mask=None):
     """
-    Voxel coordinates where label_mask is finite and non-zero (i.e. has a
-    defined concordant(+1)/discordant(-1) value), optionally restricted to
-    brain_mask. Returns (N, 3) int array.
+    Координаты вокселей, в которых label_mask конечен и не равен нулю
+    (то есть имеет определённое значение concordant(+1)/discordant(-1)),
+    опционально ограниченные маской brain_mask. Возвращает целочисленный
+    массив (N, 3).
     """
     valid = np.isfinite(label_mask) & (label_mask != 0)
     if brain_mask is not None:
@@ -56,16 +59,17 @@ def labeled_voxel_coords(label_mask, brain_mask=None):
 
 def split_by_axis(coords, axis_index, midpoint, margin):
     """
-    Splits voxel coordinates into two leakage-safe groups along one axis
-    (0=x/left-right, 1=y/anterior-posterior, 2=z/inferior-superior).
+    Делит координаты вокселей на две защищённые от утечки группы вдоль
+    одной оси (0=x/лево-право, 1=y/перед-зад, 2=z/низ-верх).
 
-    Voxels within `margin` voxels of `midpoint` on either side are dropped
-    entirely, so no patch on one side can overlap a patch on the other side
-    (safe as long as margin >= patch_size // 2).
+    Воксели в пределах `margin` вокселей от `midpoint` с любой стороны
+    полностью отбрасываются, так что ни один патч с одной стороны не может
+    пересекаться с патчем с другой стороны (безопасно, пока
+    margin >= patch_size // 2).
 
-    Returns (mask_side_a, mask_side_b) boolean arrays over coords' first axis,
-    where side_a is coord[axis_index] < midpoint - margin, side_b is
-    coord[axis_index] > midpoint + margin.
+    Возвращает булевы массивы (mask_side_a, mask_side_b) по первой оси
+    coords, где side_a - это coord[axis_index] < midpoint - margin, а
+    side_b - coord[axis_index] > midpoint + margin.
     """
     vals = coords[:, axis_index]
     side_a = vals < (midpoint - margin)
@@ -74,7 +78,8 @@ def split_by_axis(coords, axis_index, midpoint, margin):
 
 
 def hemisphere_midpoint(volume_shape, axis_index=0):
-    """Midline voxel index along the given axis, assuming the volume is
-    roughly centered on the brain along that axis (true for these subject
-    space images, which are not affine-registered to a symmetric template)."""
+    """Индекс вокселя средней линии вдоль заданной оси, в предположении, что
+    объём примерно центрирован на мозге вдоль этой оси (верно для этих
+    изображений в пространстве пациента, которые не приведены аффинно к
+    симметричному шаблону)."""
     return volume_shape[axis_index] / 2.0

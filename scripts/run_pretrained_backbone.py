@@ -1,39 +1,44 @@
 """
-Last un-tried architectural lever from README's "Where this leaves the
-project": a 3D-MRI backbone pretrained on real external data (23andme...
-no - Med3D's 23-dataset multi-organ segmentation corpus), fine-tuned here,
-rather than one more architecture trained from scratch on our small,
-already-exhausted pooled set. Every from-scratch architecture (plain CNN,
-residual CNN, transformer hybrid, real U-Net) converged on the same
-chance-level result - this is the one remaining lever that brings in
-genuinely external data instead of just more parameters.
+Последний неопробованный архитектурный рычаг из раздела README "Куда это
+привело проект": 3D-MRI backbone, предобученный на реальных внешних данных
+(23andme... нет - на корпусе Med3D для мультиорганной сегментации из 23
+датасетов), дообученный здесь, а не ещё одна архитектура, обученная с нуля
+на нашей маленькой, уже исчерпанной объединённой выборке. Каждая архитектура,
+обученная с нуля (обычная CNN, остаточная CNN, гибрид с трансформером,
+настоящий U-Net), сошлась к одному и тому же результату на уровне случайного
+угадывания - это единственный оставшийся рычаг, который привносит подлинно
+внешние данные, а не просто увеличивает число параметров.
 
-Weights: Tencent/MedicalNet's resnet_50_23dataset.pth (Med3D, Chen et al.
-2019), 46.2M-parameter 3D ResNet50 trunk, obtained from the user's own
-GitHub release (not a network host blocked by this session's egress
-policy - see conversation) and verified before loading: file header
-matches the documented legacy torch.save format, and a static pickle-
-opcode scan (no code execution) found only expected torch/collections
-reconstruction calls, no suspicious globals.
+Веса: resnet_50_23dataset.pth от Tencent/MedicalNet (Med3D, Chen et al.
+2019), ствол 3D ResNet50 с 46,2 млн параметров, получен из собственного
+GitHub-релиза пользователя (это не сетевой хост, заблокированный политикой
+исходящих соединений этой сессии - см. переписку) и проверен перед
+загрузкой: заголовок файла соответствует документированному устаревшему
+формату torch.save, а статическое сканирование pickle-опкодов (без
+выполнения кода) обнаружило только ожидаемые вызовы восстановления
+torch/collections, без подозрительных глобальных объектов.
 
-Architecture: src/medicalnet_resnet.py reproduces the trunk (conv1/bn1/
-layer1-4, Bottleneck blocks 3-4-6-3) with an EXACT state_dict key match
-verified with strict=True - not a reimplementation that merely looks
-similar. conv1 already takes 1 input channel (T1, same as our patches),
-so no first-layer surgery is needed, unlike a typical 3-channel ImageNet
-backbone. layer3/layer4 use dilation instead of stride (Med3D keeps
-resolution high for segmentation), so total spatial downsampling is only
-~8x, not the usual 32x - a patch_size=25 input still leaves a 4x4x4
-feature map before the final pool, instead of collapsing to nothing.
+Архитектура: src/medicalnet_resnet.py воспроизводит ствол (conv1/bn1/
+layer1-4, блоки Bottleneck 3-4-6-3) с ТОЧНЫМ совпадением ключей state_dict,
+проверенным через strict=True - это не реализация "по мотивам", а точное
+воспроизведение. conv1 уже принимает 1 входной канал (T1, как и наши
+патчи), поэтому хирургия первого слоя не требуется, в отличие от типичного
+3-канального ImageNet-backbone. layer3/layer4 используют dilation вместо
+stride (Med3D сохраняет высокое разрешение для сегментации), поэтому общее
+понижение пространственного разрешения составляет всего ~8x, а не обычные
+32x - вход с patch_size=25 всё ещё оставляет карту признаков 4x4x4 перед
+финальным пулингом, а не схлопывается в ничто.
 
-Approach: FROZEN trunk (feature extraction only, no gradients, no BatchNorm
-stat updates - the point is to test whether Med3D's learned general
-3D-medical-image features are useful for this label, not to re-derive them)
-+ a small trainable MLP head (src/model.py:PretrainedFeatureHead) on the
-2048-dim pooled features. Chosen for CPU feasibility: computing 46M-param
-trunk forward passes once per patch (not once per epoch) makes the many-
-epoch part of training cheap. A full unfrozen fine-tune remains a possible
-follow-up if this shows any signal worth chasing.
+Подход: ЗАМОРОЖЕННЫЙ ствол (только извлечение признаков, без градиентов, без
+обновления статистик BatchNorm - цель в том, чтобы проверить, полезны ли
+для данной метки общие 3D-медицинские признаки, выученные Med3D, а не
+переоткрыть их заново) + небольшая обучаемая MLP-голова
+(src/model.py:PretrainedFeatureHead) поверх 2048-мерных агрегированных
+признаков. Выбрано ради выполнимости на CPU: вычисление прямого прохода
+46-миллионного ствола один раз на патч (а не один раз на эпоху) делает
+многоэпоховую часть обучения дешёвой. Полное дообучение без заморозки
+остаётся возможным следующим шагом, если здесь обнаружится сигнал, который
+стоит развивать.
 """
 
 import os
@@ -58,7 +63,7 @@ from src import viz
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "results", "pretrained_backbone")
 CHECKPOINT_PATH = os.path.join(os.path.dirname(__file__), "..", "pretrained_weights", "resnet_50_23dataset.pth")
 CONTRASTS = ["calc", "mem"]
-PATCH_SIZE = 25  # gives a 4x4x4x2048 trunk feature map (see module docstring); patch=9/15 leave only 2x2x2
+PATCH_SIZE = 25  # даёт карту признаков ствола 4x4x4x2048 (см. docstring модуля); patch=9/15 оставляют только 2x2x2
 MAX_VOXELS_PER_SIDE_PER_SUBJECT = 300
 SEED = 0
 
@@ -80,14 +85,14 @@ def process_subject(sub, backbone):
     try:
         result, notes = load_subject_robust(sub)
     except Exception as e:
-        print(f"  [error] {sub}: {e}")
+        print(f"  [ошибка] {sub}: {e}")
         return None
     if result is None:
-        print(f"  [skip] {sub}: {notes}")
+        print(f"  [пропуск] {sub}: {notes}")
         return None
     t1, affine, mask, cmro2, bold_pct = result
     if notes:
-        print(f"  [notes] {sub}: {notes}")
+        print(f"  [примечания] {sub}: {notes}")
 
     midpoint = hemisphere_midpoint(t1.shape, axis_index=0)
     margin = PATCH_SIZE // 2
@@ -100,7 +105,7 @@ def process_subject(sub, backbone):
             continue
         n_conc, n_disc = int((label > 0).sum()), int((label < 0).sum())
         if min(n_conc, n_disc) < 20:
-            print(f"  [skip contrast] {sub} {contrast}: degenerate label")
+            print(f"  [пропуск контраста] {sub} {contrast}: вырожденная метка")
             continue
 
         coords, labels = select_labeled_coords(label, mask, max_voxels=None, seed=SEED)
@@ -118,7 +123,7 @@ def process_subject(sub, backbone):
         side_tags = np.array(["A"] * len(idx_a) + ["B"] * len(idx_b))
 
         patches = extract_and_normalize_patches(t1, used_coords, PATCH_SIZE, mask)
-        feats = extract_backbone_features(backbone, patches)  # (N, 2048) - patches discarded right after
+        feats = extract_backbone_features(backbone, patches)  # (N, 2048) - патчи сразу же отбрасываются
         out[contrast] = {"feats": feats, "labels": labels[used_idx], "side": side_tags}
 
     return out if out else None
@@ -126,10 +131,10 @@ def process_subject(sub, backbone):
 
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
-    print("Loading pretrained MedicalNet ResNet50 trunk...")
+    print("Загрузка предобученного ствола MedicalNet ResNet50...")
     backbone = load_pretrained_trunk(CHECKPOINT_PATH)
     n_params = sum(p.numel() for p in backbone.parameters())
-    print(f"Loaded, {n_params:,} params, frozen.")
+    print(f"Загружено, {n_params:,} параметров, заморожен.")
 
     pooled = {c: {"feats": [], "labels": [], "side": [], "subject": []} for c in CONTRASTS}
     log = []
@@ -138,7 +143,7 @@ def main():
         try:
             result = process_subject(sub, backbone)
         except Exception:
-            print(f"  [error] {sub}:\n{traceback.format_exc()}")
+            print(f"  [ошибка] {sub}:\n{traceback.format_exc()}")
             result = None
         if result is None:
             log.append({"subject": sub, "status": "skipped"})
@@ -156,16 +161,16 @@ def main():
     all_results = {}
     for contrast in CONTRASTS:
         if not pooled[contrast]["feats"]:
-            print(f"{contrast}: no usable subjects, skipping")
+            print(f"{contrast}: нет пригодных пациентов, пропуск")
             continue
         feats = np.concatenate(pooled[contrast]["feats"], axis=0)
         labels = np.concatenate(pooled[contrast]["labels"], axis=0)
         side = np.concatenate(pooled[contrast]["side"], axis=0)
         n_subjects = len(set(np.concatenate(pooled[contrast]["subject"], axis=0).tolist()))
 
-        # standardize features using ALL data's mean/std per fold's TRAIN side only, done inside the loop below
+        # стандартизация признаков с использованием mean/std только TRAIN-стороны каждого разбиения, выполняется внутри цикла ниже
         pos_a, pos_b = np.where(side == "A")[0], np.where(side == "B")[0]
-        print(f"\n=== {contrast}: {n_subjects} subjects, {len(pos_a)}/{len(pos_b)} voxels A/B ===")
+        print(f"\n=== {contrast}: {n_subjects} пациентов, {len(pos_a)}/{len(pos_b)} вокселей A/B ===")
 
         for fold_name, (train_idx, test_idx) in {
             "A_train_B_test": (pos_a, pos_b),
@@ -182,7 +187,7 @@ def main():
             )
             acc = hist["val_acc"][-1]
             best_acc = max(hist["val_acc"])
-            print(f"  {fold_name}: final_acc={acc:.3f} best_acc={best_acc:.3f}")
+            print(f"  {fold_name}: итоговая_точность={acc:.3f} лучшая_точность={best_acc:.3f}")
             all_results[(contrast, fold_name)] = {"final_acc": acc, "best_acc": best_acc, "n_subjects": n_subjects}
             viz.plot_training_curves(
                 hist, f"pretrained-backbone {contrast} {fold_name}",
@@ -200,16 +205,16 @@ def main():
     keys = list(all_results.keys())
     vals = [all_results[k]["final_acc"] for k in keys]
     ax.bar([f"{c}\n{f}" for c, f in keys], vals, color="#c0392b")
-    ax.axhline(0.5, color="gray", linestyle=":", label="chance")
-    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="target range")
+    ax.axhline(0.5, color="gray", linestyle=":", label="случайный уровень")
+    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="целевой диапазон")
     ax.set_ylim(0, 1)
-    ax.set_title("Pretrained MedicalNet ResNet50 (frozen) + MLP head, patch=25")
+    ax.set_title("Предобученный MedicalNet ResNet50 (заморожен) + MLP-голова, patch=25")
     ax.legend(fontsize=8)
     fig.tight_layout()
     out_path = os.path.join(OUT_DIR, "pretrained_backbone_summary.png")
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
-    print(f"\nSaved {out_path}")
+    print(f"\nСохранено {out_path}")
 
 
 if __name__ == "__main__":

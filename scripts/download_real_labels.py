@@ -1,21 +1,22 @@
 """
-Downloads the real files needed for the real concordant/discordant label,
-recovered from OpenNeuro's S3 object-version history for ds004873
-(CC0-licensed). The dataset's current top-level listing only shows raw
-T1w/MESE/BOLD (see README.md "Current data status"), but earlier snapshots
-of the same public, CC0 dataset included a full `derivatives/` tree with
-exactly the qmri/func outputs the source pipeline (combined_pipeline.py)
-expects. S3 keeps old object versions even after a key is "deleted"
-(a delete marker, not an erasure) - `list_versions.py` walks that history
-and this script fetches, for each needed file, the most recent version
-that still has real content, via `?versionId=...`.
+Скачивает реальные файлы, необходимые для реальной метки
+concordant/discordant, восстановленные из истории версий объектов S3
+OpenNeuro для ds004873 (лицензия CC0). Текущий листинг верхнего уровня
+датасета показывает только исходные T1w/MESE/BOLD (см. README.md "Current
+data status"), но более ранние снимки того же публичного датасета с
+лицензией CC0 включали полное дерево `derivatives/` ровно с теми выходами
+qmri/func, которые ожидает исходный конвейер (combined_pipeline.py). S3
+хранит старые версии объекта даже после "удаления" ключа (маркер удаления,
+а не стирание) - `list_versions.py` проходит по этой истории, и этот
+скрипт для каждого нужного файла загружает самую свежую версию, в которой
+ещё есть реальное содержимое, через `?versionId=...`.
 
-For each subject, downloads:
-  - <sub>_space-T2_desc-brain_T1w.nii.gz   (structural, same space as labels)
+Для каждого пациента скачивается:
+  - <sub>_space-T2_desc-brain_T1w.nii.gz   (структурный снимок, то же пространство, что и метки)
   - <sub>_task-calccontrol_space-T2_BOLD_percchange.nii.gz
   - <sub>_task-memcontrol_space-T2_BOLD_percchange.nii.gz
   - <sub>_task-{calc,control,mem}_space-T2_desc-orig_cmro2.nii
-  - <sub>_BrMsk_CSF_30slices.nii.gz         (brain mask, same space)
+  - <sub>_BrMsk_CSF_30slices.nii.gz         (маска мозга, то же пространство)
 """
 
 import os
@@ -44,11 +45,12 @@ NEEDED_SUFFIXES = [
 
 
 def download_versioned(key, version_id, out_path, retries=4):
-    """Downloads to a .part temp file first, only renaming to out_path on a
-    complete, verified transfer - so a failed/interrupted attempt (large
-    filtered_func downloads occasionally drop mid-transfer) never leaves a
-    corrupt file sitting where the "already downloaded, skip" check above
-    would trust it next run. Retries with backoff on transient failures."""
+    """Сначала скачивает во временный файл .part и переименовывает его в
+    out_path только после полной, проверенной передачи - чтобы неудачная
+    или прерванная попытка (большие загрузки filtered_func иногда обрываются
+    посередине) никогда не оставляла повреждённый файл там, где проверка
+    "уже скачано, пропуск" выше доверилась бы ему при следующем запуске.
+    При временных сбоях повторяет попытку с задержкой."""
     if os.path.exists(out_path):
         return out_path
     url = S3_BASE + key.replace(" ", "%20") + f"?versionId={version_id}"
@@ -69,7 +71,7 @@ def download_versioned(key, version_id, out_path, retries=4):
                         f.write(chunk)
                         written += len(chunk)
             if expected is not None and written != expected:
-                raise IOError(f"incomplete download: got {written} of {expected} bytes")
+                raise IOError(f"неполная загрузка: получено {written} из {expected} байт")
             os.replace(tmp_path, out_path)
             return out_path
         except Exception as e:
@@ -92,7 +94,7 @@ def download_subject_labels(subject, versions_cache_dir=VERSIONS_CACHE_DIR, data
         matches = [k for k in version_map if k.endswith(subject + suffix) or k.endswith(suffix) and subject in k]
         matches = [k for k in matches if k.split("/")[-1].startswith(subject)]
         if not matches:
-            print(f"  [!] no match for {subject}{suffix}")
+            print(f"  [!] совпадение для {subject}{suffix} не найдено")
             continue
         key = matches[0]
         version_id, last_modified = version_map[key]

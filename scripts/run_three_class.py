@@ -1,30 +1,32 @@
 """
-Recasts the task as 3-class (concordant / discordant / unreliable)
-instead of forcing every voxel into a binary concordant/discordant
-call - a more honest reflection of the Buchel et al. (2026) finding
-(see README/report 06j-06k) that a large share of voxels' true sign
-isn't statistically determinable at all. Rather than silently keeping
-those voxels in a 2-class problem (implicitly asserting they have a
-knowable true sign) or silently dropping them (as the reliability-
-filtered experiments did), this gives the model an explicit third
-option and scores it on whether it can tell reliable from unreliable
-voxels at all, not just get the sign right on the ones that are.
+Переформулирует задачу как 3-классовую (concordant / discordant /
+unreliable) вместо того, чтобы принудительно относить каждый воксель к
+одному из двух классов concordant/discordant - более честное отражение
+результата Buchel et al. (2026) (см. README/отчёт 06j-06k) о том, что
+для значительной доли вокселей истинный знак вообще статистически не
+определим. Вместо того чтобы молча оставлять эти воксели в 2-классовой
+задаче (неявно утверждая, что у них есть определимый истинный знак) или
+молча отбрасывать их (как делали эксперименты с фильтрацией по
+надёжности), здесь модели даётся явный третий вариант, и она оценивается
+по тому, способна ли она вообще отличить надёжные воксели от ненадёжных,
+а не только правильно определить знак у тех, что надёжны.
 
-Class 2 ("unreliable") = the bottom half of each fold's *training*
-voxels by |CMRO2_percchange| (same magnitude proxy as
-run_reliability_filtered.py, same threshold-fit-on-train-only
-discipline so nothing about test labels leaks into the cutoff); classes
-0/1 = discordant/concordant for voxels above that threshold. Same
-architecture (SimplePatchCNN, patch=9, now with n_classes=3 and
-CrossEntropyLoss via train_one_fold_multiclass) and voxel-selection
-protocol as every other structural-only run in this project, for direct
-comparability.
+Класс 2 ("unreliable") = нижняя половина *обучающих* вокселей каждого
+разбиения по |CMRO2_percchange| (тот же прокси по величине, что и в
+run_reliability_filtered.py, та же дисциплина подбора порога только на
+обучающей части, чтобы никакая информация о тестовых метках не
+просачивалась в порог); классы 0/1 = discordant/concordant для вокселей
+выше этого порога. Та же архитектура (SimplePatchCNN, patch=9, теперь с
+n_classes=3 и CrossEntropyLoss через train_one_fold_multiclass) и тот же
+протокол отбора вокселей, что и в любом другом запуске только по
+структурным данным в этом проекте, для прямой сопоставимости.
 
-Reports both standard 3-class accuracy (chance = 1/3, not 1/2 - the
-callout box in the summary plot marks this explicitly) and a secondary,
-more interpretable number: binary sign-accuracy restricted to voxels
-that were *actually* reliable in the test set (a strict "predicted the
-right side of a coin AND correctly recognized it as flippable" score).
+Сообщается как стандартная 3-классовая точность (уровень случайного
+угадывания = 1/3, а не 1/2 - это явно отмечено во врезке на сводном
+графике), так и вторичное, более интерпретируемое число: бинарная
+точность определения знака, ограниченная вокселями, которые в тестовой
+выборке были *действительно* надёжны (строгая оценка «угадал нужную
+сторону монеты И правильно распознал, что её вообще можно подбрасывать»).
 """
 
 import os
@@ -71,10 +73,10 @@ def process_subject(sub):
     try:
         result, notes = load_subject_robust(sub)
     except Exception as e:
-        print(f"  [error] {sub}: {e}")
+        print(f"  [ошибка] {sub}: {e}")
         return None
     if result is None:
-        print(f"  [skip] {sub}: {notes}")
+        print(f"  [пропуск] {sub}: {notes}")
         return None
     t1, affine, mask, cmro2, bold_pct = result
 
@@ -93,7 +95,7 @@ def process_subject(sub):
 
         coords = labeled_voxel_coords(label, mask)
         raw_labels = label[coords[:, 0], coords[:, 1], coords[:, 2]]
-        binary_labels = (raw_labels > 0).astype(np.int64)  # 1=concordant, 0=discordant (pre-unreliable-split)
+        binary_labels = (raw_labels > 0).astype(np.int64)  # 1=concordant, 0=discordant (до разделения по unreliable)
         rel_vals = reliability[coords[:, 0], coords[:, 1], coords[:, 2]]
 
         side_a, side_b = split_by_axis(coords, 0, midpoint, margin)
@@ -131,7 +133,7 @@ def main():
         try:
             result = process_subject(sub)
         except Exception:
-            print(f"  [error] {sub}:\n{traceback.format_exc()}")
+            print(f"  [ошибка] {sub}:\n{traceback.format_exc()}")
             result = None
         if result is None:
             log.append({"subject": sub, "status": "skipped"})
@@ -147,7 +149,7 @@ def main():
     with open(os.path.join(OUT_DIR, "subject_log.json"), "w") as f:
         json.dump(log, f, indent=1, default=str)
     n_used = sum(1 for e in log if e["status"] == "used")
-    print(f"\n{n_used}/{len(ALL_SUBJECTS)} subjects used")
+    print(f"\n{n_used}/{len(ALL_SUBJECTS)} пациентов использовано")
 
     all_results = {}
     for contrast in CONTRASTS:
@@ -160,7 +162,7 @@ def main():
         n_subjects = len(set(np.concatenate(pooled[contrast]["subject"], axis=0).tolist()))
 
         pos_a, pos_b = np.where(side == "A")[0], np.where(side == "B")[0]
-        print(f"\n=== {contrast}: {n_subjects} subjects, {len(pos_a)}/{len(pos_b)} voxels A/B ===")
+        print(f"\n=== {contrast}: {n_subjects} пациентов, {len(pos_a)}/{len(pos_b)} вокселей A/B ===")
 
         for fold_name, (train_idx, test_idx) in {
             "A_train_B_test": (pos_a, pos_b),
@@ -183,7 +185,7 @@ def main():
             else:
                 strict_acc = float("nan")
 
-            print(f"  {fold_name}: 3-class acc={acc:.3f} (chance=0.333)  strict binary-on-reliable acc={strict_acc:.3f}")
+            print(f"  {fold_name}: точность 3 классов acc={acc:.3f} (случайный уровень=0.333)  строгая бинарная точность на надёжных acc={strict_acc:.3f}")
             all_results[(contrast, fold_name)] = {
                 "three_class_acc": acc, "strict_reliable_acc": strict_acc,
                 "n_train": len(train_idx), "n_test": len(test_idx), "n_subjects": n_subjects,
@@ -215,7 +217,7 @@ def main():
     out_path = os.path.join(OUT_DIR, "three_class_summary.png")
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
-    print(f"\nSaved {out_path}")
+    print(f"\nСохранено: {out_path}")
 
 
 if __name__ == "__main__":
