@@ -232,10 +232,10 @@ def main():
     keys = list(all_results.keys())
     vals = [all_results[k] for k in keys]
     ax.bar([f"{c}\n{f}" for c, f in keys], vals, color="#16a085")
-    ax.axhline(0.5, color="gray", linestyle=":", label="chance")
-    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="target range")
+    ax.axhline(0.5, color="gray", linestyle=":", label="случайность")
+    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="целевой диапазон")
     ax.set_ylim(0, 1)
-    ax.set_title(f"Data-driven parcellation (k-means, k={N_CLUSTERS}) region features")
+    ax.set_title(f"Признаки регионов парцеллирования на основе данных (k-means, k={N_CLUSTERS})")
     ax.legend(fontsize=8)
     fig.tight_layout()
     out_path = os.path.join(OUT_DIR, "parcellation_summary.png")

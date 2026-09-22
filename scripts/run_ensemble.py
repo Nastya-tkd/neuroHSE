@@ -138,12 +138,12 @@ def main():
     width = 0.35
     vals = [all_results[k]["ensemble_acc"] for k in keys]
     base = [all_results[k]["majority_baseline"] for k in keys]
-    ax.bar(x - width / 2, vals, width, label="ensemble (4 architectures)", color="#8e44ad")
-    ax.bar(x + width / 2, base, width, label="majority-class baseline", color="#8e44ad", alpha=0.4, hatch="//")
+    ax.bar(x - width / 2, vals, width, label="ансамбль (4 архитектуры)", color="#8e44ad")
+    ax.bar(x + width / 2, base, width, label="базовый уровень «большинство»", color="#8e44ad", alpha=0.4, hatch="//")
     ax.set_xticks(x)
     ax.set_xticklabels([f"{c}\n{f}" for c, f in keys], fontsize=9)
     ax.set_ylim(0, 1)
-    ax.set_title("4-architecture soft-vote ensemble vs. its own majority-class baseline")
+    ax.set_title("Ансамбль из 4 архитектур (мягкое голосование) против своего же базового уровня «большинство»")
     ax.legend(fontsize=8)
     fig.tight_layout()
     out_path = os.path.join(OUT_DIR, "ensemble_summary.png")

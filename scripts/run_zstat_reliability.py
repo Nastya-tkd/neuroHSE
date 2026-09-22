@@ -236,13 +236,13 @@ def main():
     for i, tier in enumerate(tier_names):
         vals = [all_results.get((c, f, tier), {}).get("acc", np.nan) for c, f in keys]
         base = [all_results.get((c, f, tier), {}).get("majority_baseline", np.nan) for c, f in keys]
-        ax.bar(x + (i - 1) * width * 2, vals, width, label=f"{tier} (model)", color=colors[tier])
-        ax.bar(x + (i - 1) * width * 2 + width, base, width, label=f"{tier} (majority baseline)",
+        ax.bar(x + (i - 1) * width * 2, vals, width, label=f"{tier} (модель)", color=colors[tier])
+        ax.bar(x + (i - 1) * width * 2 + width, base, width, label=f"{tier} (базовый уровень «большинство»)",
                color=colors[tier], alpha=0.4, hatch="//")
     ax.set_xticks(x)
     ax.set_xticklabels([f"{c}\n{f}" for c, f in keys], fontsize=9)
     ax.set_ylim(0, 1)
-    ax.set_title("Real first-level Z-statistic reliability filter\n(model accuracy vs. its own majority-class baseline, side by side)")
+    ax.set_title("Фильтр надёжности по реальной Z-статистике первого уровня\n(точность модели против своего же базового уровня «большинство», бок о бок)")
     ax.legend(fontsize=7, ncol=2)
     fig.tight_layout()
     out_path = os.path.join(OUT_DIR, "zstat_reliability_summary.png")

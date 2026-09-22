@@ -261,12 +261,12 @@ def main():
     for i, p in enumerate(PATCH_SIZES):
         accs = [all_results.get((c, f, p), {}).get("classification_acc", np.nan) for (c, f) in labels_x]
         axes[0].bar(x + (i - 0.5) * width, accs, width, label=f"patch={p}")
-    axes[0].axhline(0.5, color="gray", linestyle=":", label="chance")
-    axes[0].axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="target range")
+    axes[0].axhline(0.5, color="gray", linestyle=":", label="случайность")
+    axes[0].axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="целевой диапазон")
     axes[0].set_xticks(x)
     axes[0].set_xticklabels([f"{c}\n{f}" for c, f in labels_x], fontsize=8)
     axes[0].set_ylim(0, 1)
-    axes[0].set_title("Classification accuracy by patch size")
+    axes[0].set_title("Точность классификации по размеру патча")
     axes[0].legend(fontsize=7)
 
     for i, p in enumerate(PATCH_SIZES):
@@ -275,10 +275,10 @@ def main():
     axes[1].axhline(0, color="gray", linestyle=":")
     axes[1].set_xticks(x)
     axes[1].set_xticklabels([f"{c}\n{f}" for c, f in labels_x], fontsize=8)
-    axes[1].set_title("Regression R2 by patch size")
+    axes[1].set_title("R2 регрессии по размеру патча")
     axes[1].legend(fontsize=7)
 
-    fig.suptitle(f"Pooled cohort ({sum(1 for s,r in log if r != 'skipped')} subjects): bigger patch + regression")
+    fig.suptitle(f"Объединённая выборка ({sum(1 for s,r in log if r != 'skipped')} пациентов): больший патч + регрессия")
     fig.tight_layout()
     out_path = os.path.join(OUT_DIR, "pooled_extended_summary.png")
     fig.savefig(out_path, dpi=150)

@@ -204,14 +204,14 @@ def main():
     width = 0.35
     three_vals = [all_results[k]["three_class_acc"] for k in keys]
     strict_vals = [all_results[k]["strict_reliable_acc"] for k in keys]
-    ax.bar(x - width / 2, three_vals, width, label="3-class accuracy", color="#8e44ad")
-    ax.bar(x + width / 2, strict_vals, width, label="binary acc. on true-reliable subset", color="#16a085")
-    ax.axhline(1 / 3, color="gray", linestyle=":", label="3-class chance (0.333)")
-    ax.axhline(0.5, color="gray", linestyle="--", linewidth=0.8, label="binary chance (0.5)")
+    ax.bar(x - width / 2, three_vals, width, label="точность (3 класса)", color="#8e44ad")
+    ax.bar(x + width / 2, strict_vals, width, label="бинарная точность на подмножестве истинно-надёжных", color="#16a085")
+    ax.axhline(1 / 3, color="gray", linestyle=":", label="случайность для 3 классов (0.333)")
+    ax.axhline(0.5, color="gray", linestyle="--", linewidth=0.8, label="случайность для бинарной (0.5)")
     ax.set_xticks(x)
     ax.set_xticklabels([f"{c}\n{f}" for c, f in keys], fontsize=9)
     ax.set_ylim(0, 1)
-    ax.set_title("3-class (concordant/discordant/unreliable) framing")
+    ax.set_title("Постановка задачи с 3 классами (concordant/discordant/unreliable)")
     ax.legend(fontsize=8)
     fig.tight_layout()
     out_path = os.path.join(OUT_DIR, "three_class_summary.png")

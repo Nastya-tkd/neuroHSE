@@ -114,12 +114,12 @@ def main():
     for i, arch_name in enumerate(ARCHITECTURES):
         vals = [all_results.get((c, f, arch_name), {}).get("final_acc", np.nan) for c, f in keys]
         ax.bar(x + (i - 1.5) * width, vals, width, label=arch_name, color=colors[arch_name])
-    ax.axhline(0.5, color="gray", linestyle=":", label="chance")
-    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="target range")
+    ax.axhline(0.5, color="gray", linestyle=":", label="случайность")
+    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="целевой диапазон")
     ax.set_xticks(x)
     ax.set_xticklabels([f"{c}\n{f}" for c, f in keys], fontsize=9)
     ax.set_ylim(0, 1)
-    ax.set_title(f"Fine-tuned (augmentation + cosine LR + {EPOCHS} epochs), patch={PATCH_SIZE}, 4 architectures incl. U-Net")
+    ax.set_title(f"Дообучение (аугментация + косинусный LR + {EPOCHS} эпох), patch={PATCH_SIZE}, 4 архитектуры вкл. U-Net")
     ax.legend(fontsize=8, loc="upper right")
     fig.tight_layout()
     out_path = os.path.join(OUT_DIR, "finetune_summary.png")

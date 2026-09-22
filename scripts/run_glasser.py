@@ -224,10 +224,10 @@ def main():
     keys = list(all_results.keys())
     vals = [all_results[k] for k in keys]
     ax.bar([f"{c}\n{f}" for c, f in keys], vals, color="#8e44ad")
-    ax.axhline(0.5, color="gray", linestyle=":", label="chance")
-    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="target range")
+    ax.axhline(0.5, color="gray", linestyle=":", label="случайность")
+    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="целевой диапазон")
     ax.set_ylim(0, 1)
-    ax.set_title("Real Glasser/HCP-MMP1.0 parcel region features (volumetric approximation)")
+    ax.set_title("Признаки регионов реального парцеллирования Glasser/HCP-MMP1.0 (объёмное приближение)")
     ax.legend(fontsize=8)
     fig.tight_layout()
     out_path = os.path.join(OUT_DIR, "glasser_summary.png")

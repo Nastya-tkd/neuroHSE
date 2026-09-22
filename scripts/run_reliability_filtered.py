@@ -216,12 +216,12 @@ def main():
     for i, tier in enumerate(["all", "top50pct", "top25pct"]):
         vals = [all_results.get((c, f, tier), {}).get("acc", np.nan) for c, f in keys]
         ax.bar(x + (i - 1) * width, vals, width, label=tier, color=colors[tier])
-    ax.axhline(0.5, color="gray", linestyle=":", label="chance")
-    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="target range")
+    ax.axhline(0.5, color="gray", linestyle=":", label="случайность")
+    ax.axhspan(0.65, 0.70, color="#16a085", alpha=0.15, label="целевой диапазон")
     ax.set_xticks(x)
     ax.set_xticklabels([f"{c}\n{f}" for c, f in keys], fontsize=9)
     ax.set_ylim(0, 1)
-    ax.set_title("Structural-only accuracy vs. |CMRO2_percchange| reliability filter\n(tests the Buchel et al. 2026 statistical-uncertainty explanation)")
+    ax.set_title("Точность только по структуре против фильтра надёжности по |CMRO2_percchange|\n(проверка объяснения статистической неопределённости Buchel et al. 2026)")
     ax.legend(fontsize=8)
     fig.tight_layout()
     out_path = os.path.join(OUT_DIR, "reliability_filtered_summary.png")
