@@ -12,3 +12,4 @@ __pycache__/
 !stoprak/data/
 !stoprak/data/**
 !stoprak/data/**/*.nii.gz
+stoprak-prototype.zip
