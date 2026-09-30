@@ -17,12 +17,26 @@ let vr = null, hero = null, heroData = null, vrCell = null, activeView = null;
 app.stroke = new Map(); app.spaceDown = false;
 
 /* ------------------------------------------------------------ загрузка данных */
-async function fetchBlob(url) { const r = await fetch(url); if (!r.ok) throw new Error(`Не удалось загрузить ${url} (${r.status})`); return r.blob(); }
+// Данные читаются через fetch (веб-сервер) либо, при открытии index.html двойным кликом (file://), из data/*.js со встроенным base64
+function loadScriptData(url) {
+  window.__SR = window.__SR || {};
+  return new Promise((res, rej) => {
+    if (window.__SR[url]) return res(window.__SR[url]);
+    const sc = document.createElement('script'); sc.src = url + '.js';
+    sc.onload = () => (window.__SR[url] ? res(window.__SR[url]) : rej(new Error('Пустой файл данных ' + url)));
+    sc.onerror = () => rej(new Error('Не удалось загрузить ' + url)); document.head.appendChild(sc);
+  });
+}
+const b64blob = (b64) => { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Blob([u]); };
+async function fetchBlob(url) {
+  if (location.protocol !== 'file:') { const r = await fetch(url); if (!r.ok) throw new Error(`Не удалось загрузить ${url} (${r.status})`); return r.blob(); }
+  return b64blob(await loadScriptData(url));
+}
 function part(id, name) {
   cache[id] = cache[id] || {};
   if (!cache[id][name]) {
     const base = `data/${id}/`;
-    cache[id][name] = name === 'meta' ? fetch(base + 'case.json').then((r) => r.json())
+    cache[id][name] = name === 'meta' ? fetchBlob(base + 'case.json').then((b) => b.text()).then(JSON.parse)
       : name === 'seg' ? fetchBlob(base + 'seg.nii.gz').then(loadLabels)
       : name.startsWith('depth') ? fetchBlob(base + name + '.nii.gz').then(loadLabels)
       : fetchBlob(base + name + '.nii.gz').then((b) => loadVol(b, { name }));

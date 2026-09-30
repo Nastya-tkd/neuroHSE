@@ -11,7 +11,9 @@ python3 -m http.server 8000          # или: nohup python3 -m http.server 8000
 # открыть http://localhost:8000
 ```
 
-Нужен именно веб-сервер (ES-модули и `fetch` не работают с `file://`). Браузер — современный Chrome/Edge/Firefox/Safari с WebGL2.
+Можно также просто открыть `index.html` двойным кликом: сайт собран в `dist/app.js`, а данные продублированы в `data/*.js`, поэтому `file://` работает. Браузер — современный Chrome/Edge/Firefox/Safari с WebGL2.
+
+Пересборка после правок в `js/`: `npx esbuild js/app.js --bundle --format=iife --outfile=dist/app.js --minify`.
 
 ## Что внутри
 
