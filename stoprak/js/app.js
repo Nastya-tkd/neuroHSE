@@ -29,7 +29,7 @@ function loadScriptData(url) {
 }
 const b64blob = (b64) => { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Blob([u]); };
 async function fetchBlob(url) {
-  if (location.protocol !== 'file:') { const r = await fetch(url); if (!r.ok) throw new Error(`Не удалось загрузить ${url} (${r.status})`); return r.blob(); }
+  if (location.protocol !== 'file:') { try { const r = await fetch(url); if (r.ok) return r.blob(); } catch (e) { /* пробуем встроенные данные */ } }
   return b64blob(await loadScriptData(url));
 }
 function part(id, name) {
