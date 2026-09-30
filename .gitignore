@@ -7,3 +7,8 @@ pretrained_weights/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+
+# веб-прототип СТОП-РАК: демо-данные (обезличенные, CC0) должны попасть в репозиторий
+!stoprak/data/
+!stoprak/data/**
+!stoprak/data/**/*.nii.gz

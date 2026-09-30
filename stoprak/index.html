@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>СТОП-РАК — рабочее пространство врача</title>
+<meta name="description" content="Прототип: просмотр МРТ головного мозга в 2D и 3D, сегментация опухоли, показатели, сравнение, моделирование лечения и ИИ-помощник.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2319C3B1'/%3E%3Ccircle cx='16' cy='16' r='6' fill='none' stroke='%2304201D' stroke-width='3'/%3E%3C/svg%3E">
+</head>
+<body>
+
+<!-- =====================================================  ГЛАВНАЯ  ===================================================== -->
+<div id="screen-landing" class="screen is-active">
+  <header class="lp-header">
+    <a class="lp-logo" href="#top"><span class="lp-logo-mark"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><circle cx="12" cy="12" r="6.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></span>СТОП-РАК</a>
+    <nav class="lp-nav"><a href="#features">Возможности</a><a href="#how">Как это работает</a><a href="#roles">Для врачей</a></nav>
+    <div class="lp-header-actions">
+      <button class="btn btn-ghost" data-act="upload">Загрузить свое МРТ</button>
+      <button class="btn btn-primary" data-act="open-demo"><span class="long">Открыть демонстрационный случай</span><span class="short">Демо-случай</span></button>
+    </div>
+  </header>
+
+  <main id="top">
+  <div class="lp-wrap">
+    <section class="lp-hero">
+      <div class="lp-hero-copy">
+        <div class="lp-eyebrow">Клиническое рабочее пространство · нейроонкология</div>
+        <h1>МРТ опухоли — от&nbsp;снимка до&nbsp;<em>персонализированного лечения</em></h1>
+        <p>Визуализация, сегментация, количественный анализ и моделирование ответа на лечение в едином рабочем пространстве врача.</p>
+        <div class="lp-cta">
+          <button class="btn btn-primary btn-lg" data-act="open-demo">Открыть демонстрационный случай <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+          <button class="btn btn-ghost btn-lg" data-act="upload"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></svg> Загрузить свое МРТ</button>
+        </div>
+        <ul class="lp-facts">
+          <li><b>4</b><span>МРТ-последовательности<br>T1 · T1-Gd · T2 · FLAIR</span></li>
+          <li><b>2D + 3D</b><span>MPR-срезы и объёмная<br>реконструкция в браузере</span></li>
+          <li><b>Локально</b><span>файлы читаются в браузере<br>и не уходят на сервер</span></li>
+        </ul>
+      </div>
+
+      <div class="hero-viewer" id="heroViewer">
+        <div class="hero-glow"></div>
+        <div class="hero-canvas" id="heroCanvas"></div>
+        <div class="hero-loader" id="heroLoader"><div class="spinner"></div><span>Загрузка реального МРТ…</span></div>
+        <div class="hero-toggles" id="heroToggles" role="group" aria-label="Слои опухоли">
+          <button class="tg is-on" data-layer="all" aria-pressed="true"><i class="dot" style="--c:#E8EEF4"></i>Вся опухоль</button>
+          <button class="tg is-on" data-layer="enh" aria-pressed="true"><i class="dot" style="--c:#FF5B61"></i>Активная зона</button>
+          <button class="tg is-on" data-layer="nec" aria-pressed="true"><i class="dot" style="--c:#F5A623"></i>Некроз</button>
+          <button class="tg is-on" data-layer="ede" aria-pressed="true"><i class="dot" style="--c:#38BDF8"></i>Отёк</button>
+        </div>
+        <div class="hero-hint"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg> Потяните, чтобы повернуть · колесо — масштаб</div>
+        <div class="hero-note"><span class="pip"></span>Демонстрационная визуализация: обезличённое МРТ из открытого набора данных, не данные реального пациента клиники</div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Ленточка «как это работает» -->
+  <section class="lp-section" id="how">
+    <div class="lp-wrap">
+      <div class="lp-eyebrow">Как это работает</div>
+      <h2 class="lp-h2">От МРТ к клиническому решению</h2>
+      <p class="lp-lead">В демонстрационном случае можно пройти весь рабочий путь: открыть исследование, проверить сегментацию, оценить динамику и изучить сценарии лечения.</p>
+      <div class="steps">
+        <div class="step"><span class="step-n">01</span><h3>Открыть исследование</h3><p>Настоящее МРТ в трёх плоскостях и в 3D. Переключайте T1, T1-Gd, T2 и FLAIR, прокручивайте срезы синхронно.</p></div>
+        <div class="step"><span class="step-n">02</span><h3>Проверить сегментацию</h3><p>Запустите анализ, скорректируйте маску кистью и подтвердите результат — статус проверки всегда на виду.</p></div>
+        <div class="step"><span class="step-n">03</span><h3>Оценить динамику</h3><p>Сравните две временные точки: карта роста и уменьшения, таблица объёмов, временная шкала лечения.</p></div>
+        <div class="step"><span class="step-n">04</span><h3>Изучить сценарии лечения</h3><p>Смоделируйте ответ на выбранный план или получите варианты для обсуждения на консилиуме.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="lp-section" id="features">
+    <div class="lp-wrap feat">
+      <div class="feat-copy">
+        <div class="lp-eyebrow">Зоны опухоли</div>
+        <h2 class="lp-h2">Опухоль — по зонам и в деталях</h2>
+        <p class="lp-lead">Активную опухоль, некроз, отёк и другие области можно рассматривать отдельно, сопоставлять со снимками и отображать в 2D или 3D.</p>
+        <ul class="zone-list">
+          <li><i class="dot" style="--c:#FF5B61"></i><div><b>Активная опухоль</b><span>усиливающаяся после контраста (T1-Gd)</span></div><em>контур ▭</em></li>
+          <li><i class="dot" style="--c:#F5A623"></i><div><b>Некроз / неусиливающееся ядро</b><span>центральные зоны без усиления</span></div><em>штрих ▨</em></li>
+          <li><i class="dot" style="--c:#38BDF8"></i><div><b>Перифокальный отёк</b><span>FLAIR-гиперинтенсивная зона</span></div><em>заливка ▤</em></li>
+        </ul>
+        <p class="fine">Цвет дублируется формой: контур, штриховка и заливка — палитра различима при нарушениях цветового зрения.</p>
+      </div>
+      <div class="feat-vis pair">
+        <figure><img src="img/prev_ax_t1ce.jpg" alt="Аксиальный срез T1 с контрастом и маска опухоли"><figcaption>T1-Gd · аксиально</figcaption></figure>
+        <figure><img src="img/prev_ax_flair.jpg" alt="Аксиальный срез FLAIR и маска опухоли"><figcaption>FLAIR · аксиально</figcaption></figure>
+        <figure class="wide"><img src="img/prev_cor_t1ce.jpg" alt="Корональный срез"><figcaption>T1-Gd · корональная плоскость</figcaption></figure>
+        <span class="demo-tag vis-tag">РЕАЛЬНОЕ МРТ · ОБЕЗЛИЧЕНО</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="lp-section">
+    <div class="lp-wrap feat rev">
+      <div class="feat-vis">
+        <div class="mock mock-metrics">
+          <div class="mock-head"><span class="panel-title">Показатели · вычислены по маске</span><span class="demo-tag">ДЕМО-ДИНАМИКА</span></div>
+          <table class="mtable" id="lpMetrics">
+            <thead><tr><th>Показатель</th><th>Базовое</th><th>Контроль*</th><th>Δ</th></tr></thead>
+            <tbody>
+              <tr><td>Вся опухолевая область</td><td>—</td><td>—</td><td>—</td></tr>
+            </tbody>
+          </table>
+          <svg class="spark" viewBox="0 0 300 74" preserveAspectRatio="none"><defs><linearGradient id="sg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#19C3B1" stop-opacity=".35"/><stop offset="1" stop-color="#19C3B1" stop-opacity="0"/></linearGradient></defs><path d="M0,14 C60,16 100,30 150,34 S250,56 300,60 L300,74 L0,74Z" fill="url(#sg)"/><path d="M0,14 C60,16 100,30 150,34 S250,56 300,60" fill="none" stroke="#19C3B1" stroke-width="2"/><circle cx="0" cy="14" r="3.5" fill="#19C3B1"/><circle cx="300" cy="60" r="3.5" fill="#19C3B1"/></svg>
+          <p class="fine">* Контрольная точка синтетическая — построена демонстрационной моделью, чтобы показать сравнение. Требует проверки врачом.</p>
+        </div>
+      </div>
+      <div class="feat-copy">
+        <div class="lp-eyebrow">Количественный анализ</div>
+        <h2 class="lp-h2">Объёмы и динамика</h2>
+        <p class="lp-lead">Пользователь видит количественные показатели опухолевых зон и их изменение относительно предыдущего исследования — с единицами измерения, источником и пометкой о ручной коррекции.</p>
+        <ul class="ticks"><li>Объёмы, диаметры, число очагов, локализация</li><li>Сравнение: рядом, разность, карта роста</li><li>Каждое число можно нажать — область подсветится в 2D и 3D</li></ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="lp-section">
+    <div class="lp-wrap">
+      <div class="lp-eyebrow">Лечение</div>
+      <h2 class="lp-h2">Проверить план или подобрать терапию</h2>
+      <p class="lp-lead">Врач может оценить возможный ответ на уже выбранное лечение или запросить несколько обоснованных вариантов для профессионального рассмотрения. Результаты — модельные сценарии, а не назначения.</p>
+      <div class="two-cards">
+        <div class="tcard"><div class="tcard-ic"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 4 8-10"/><path d="M14 5h6v6"/></svg></div><h3>Провести моделирование лечения</h3><p>Задайте дозу, фракции, системную терапию и горизонт — получите предполагаемую маску с диапазоном неопределённости, отличимую пунктиром и штриховкой.</p><span class="badge badge-warn">Модельный сценарий</span></div>
+        <div class="tcard"><div class="tcard-ic"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h6"/><circle cx="18" cy="16" r="3"/></svg></div><h3>Подбор терапии</h3><p>Проверьте исходные данные, запустите подбор — до пяти сценариев с обоснованием, ограничениями, рисками и ссылками на руководства. Без единого «рейтинга 92/100».</p><span class="badge badge-info">Поддержка решения, не назначение</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="lp-section">
+    <div class="lp-wrap feat">
+      <div class="feat-copy">
+        <div class="lp-eyebrow">ИИ-помощник</div>
+        <h2 class="lp-h2">ИИ-консультант всегда под рукой</h2>
+        <p class="lp-lead">Он помогает разобраться в данных пациента, выполнить действие на сайте и найти медицинскую информацию со ссылками на релевантные источники.</p>
+        <ul class="ticks"><li>Всегда показывает, какой контекст ему доступен</li><li>Действия — только после вашего подтверждения</li><li>Литературные сведения отделены от результатов пациента</li></ul>
+      </div>
+      <div class="feat-vis">
+        <div class="mock chat">
+          <div class="bubble u">Подготовь сводку изменений для консилиума</div>
+          <div class="bubble a"><b>Сводка (черновик).</b> Активная зона сократилась на 19 % относительно базового исследования; очагов: 1. Контрольная точка синтетическая.<div class="ctx">Контекст: показатели · маска · история</div><div class="srcs"><span>Weller 2021, EANO</span><span>Wen 2010, RANO</span></div></div>
+          <div class="chat-actions"><span class="chip">Открыть сравнение</span><span class="chip">Создать заключение</span></div>
+          <div class="fine">ИИ-помощник может ошибаться. Сверяйте медицинские утверждения с источниками.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="lp-section" id="roles">
+    <div class="lp-wrap">
+      <div class="lp-eyebrow">Для врачей</div>
+      <h2 class="lp-h2">Единая среда для совместной работы</h2>
+      <p class="lp-lead">Каждый специалист подключается на своём этапе, а исследования, сегментации, заключения и решения остаются связаны в одном рабочем процессе.</p>
+      <div class="roles">
+        <div class="role"><span>1</span><b>Рентгенолаборант</b><em>получение и загрузка данных, техническое качество</em></div>
+        <div class="role"><span>2</span><b>Врач-рентгенолог</b><em>интерпретация, проверка маски, заключение</em></div>
+        <div class="role"><span>3</span><b>Лечащий онколог</b><em>клинический маршрут, решение о лечении</em></div>
+        <div class="role"><span>4</span><b>Радиотерапевт</b><em>мишени, органы риска, план ЛТ</em></div>
+        <div class="role"><span>5</span><b>Консультант</b><em>временный доступ к вопросу консилиума</em></div>
+      </div>
+      <div class="flow"><span class="badge badge-ai">создано ИИ</span><i>→</i><span class="badge badge-warn">проверено рентгенологом</span><i>→</i><span class="badge badge-ok">подписано</span><i>→</i><span class="badge badge-info">использовано лечащим врачом</span><i>→</i><span class="badge badge-mute">консилиум</span></div>
+    </div>
+  </section>
+
+  <section class="lp-section">
+    <div class="lp-wrap">
+      <div class="lp-eyebrow">Прозрачность</div>
+      <h2 class="lp-h2">Технологии помогают. Решение остаётся за врачом</h2>
+      <p class="lp-lead">Для каждого результата видны использованные данные, версия модели, ограничения и статус проверки специалистом.</p>
+      <div class="prov">
+        <div class="prov-col"><span class="panel-title">Происхождение результата</span>
+          <dl><dt>Данные</dt><dd>OpenNeuro ds007045 · CC0 · обезличено</dd><dt>Модель</dt><dd>SegResNet, BraTS-разметка · маски датасета</dd><dt>Проверка</dt><dd>нейрорадиологи авторов набора; в приложении — «требуется проверка врача»</dd><dt>Версия маски</dt><dd>v1 · модель → v2 · правки врача</dd></dl></div>
+        <div class="prov-col"><span class="panel-title">Ограничения</span>
+          <ul class="ticks warn"><li>Прогноз лечения — демонстрационный расчёт, не валидирован клинически</li><li>Только дооперационные МРТ в демо-наборе</li><li>Нет перфузии и DWI/ADC</li><li>Не является медицинским изделием</li></ul></div>
+        <div class="prov-col"><span class="panel-title">Предохранители</span>
+          <ul class="ticks"><li>Нет кнопки «Применить лечение»</li><li>Подтверждение врача перед протоколом</li><li>Журнал версий и правок маски</li><li>Локальная обработка загруженных файлов</li></ul></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="lp-final">
+    <div class="lp-wrap">
+      <h2>Откройте демонстрационный случай</h2>
+      <p>Настоящее МРТ глиобластомы, 3D-реконструкция и полный рабочий сценарий — за несколько кликов.</p>
+      <div class="lp-cta center">
+        <button class="btn btn-primary btn-lg" data-act="open-demo">Открыть демонстрационный случай</button>
+        <button class="btn btn-ghost btn-lg" data-act="upload">Загрузить свое МРТ</button>
+      </div>
+    </div>
+  </section>
+  </main>
+
+  <footer class="lp-footer">
+    <div class="lp-wrap">
+      <p><b>СТОП-РАК</b> — интерактивный прототип. Не является медицинским изделием и не предназначен для диагностики или назначения лечения. Демонстрационные расчёты не валидированы клинически.</p>
+      <p>Изображения и маски: Filimonova E. et al., <i>Glioblastoma MRI Dataset with Standardized Preprocessing, Expert-Validated Segmentation, and MGMT Profiling</i>, Sci Data 2026;13:1213 · OpenNeuro <a href="https://doi.org/10.18112/openneuro.ds007045.v2.0.1" target="_blank" rel="noopener">ds007045</a> · лицензия CC0.</p>
+    </div>
+  </footer>
+</div>
+
+<!-- =====================================================  РАБОЧАЯ СТАНЦИЯ  ===================================================== -->
+<div id="screen-ws" class="screen">
+  <div class="ws" id="ws">
+    <div class="ws-mobile-note">Диагностическая работа на телефоне не поддерживается: здесь доступны просмотр и краткая сводка. Для полноценной работы откройте сайт на компьютере (от 1440 px).</div>
+    <header class="ws-top">
+      <button class="icon-btn" id="btnBack" title="На главную" aria-label="На главную"></button>
+      <div class="ws-pt">
+        <div class="ws-pt-name"><span id="ptName">—</span><span class="demo-tag" id="ptTag">ДЕМО</span></div>
+        <div class="ws-pt-meta" id="ptMeta"></div>
+      </div>
+      <div class="ws-tp"><span class="ws-tp-label">Временная точка</span><div class="chips" id="tpChips"></div></div>
+      <div class="ws-top-right">
+        <span class="badge badge-mute" id="stateBadge">Данные загружены</span>
+        <button class="btn btn-sm btn-ghost" id="btnCompare">Сравнить</button>
+        <button class="btn btn-sm btn-ghost" id="btnReport">Заключение</button>
+        <button class="btn btn-sm btn-ghost" id="btnExport">Экспорт</button>
+        <button class="btn btn-sm btn-ai" id="btnAI"></button>
+        <button class="icon-btn" id="btnSettings" title="Настройки просмотра" aria-label="Настройки"></button>
+      </div>
+    </header>
+
+    <div class="ws-body" id="wsBody">
+      <!-- левая панель -->
+      <aside class="rail">
+        <div class="tabs" id="tabsLeft"><button class="tab is-active" data-tab="series">Серии</button><button class="tab" data-tab="history">История</button></div>
+        <div class="rail-scroll">
+          <div class="tabpane" data-pane-left="series" id="paneSeries"></div>
+          <div class="tabpane" data-pane-left="history" id="paneHistory" hidden></div>
+        </div>
+      </aside>
+
+      <!-- центр -->
+      <section class="center">
+        <div class="center-bar">
+          <div class="seg-ctl" id="layoutCtl" role="group" aria-label="Раскладка"></div>
+          <div class="center-bar-r">
+            <div class="seg-ctl" id="modCtl" role="group" aria-label="Последовательность"></div>
+            <div class="seg-ctl" id="presetCtl" role="group" aria-label="Окно"></div>
+          </div>
+        </div>
+        <div class="viewer-grid" id="viewerGrid"></div>
+        <div class="tool-bar" id="toolBar"></div>
+      </section>
+
+      <!-- правая панель -->
+      <aside class="side">
+        <div class="tabs" id="tabsRight">
+          <button class="tab is-active" data-tab="layers">Слои</button>
+          <button class="tab" data-tab="metrics">Показатели</button>
+          <button class="tab" data-tab="seg">Сегментация</button>
+          <button class="tab" data-tab="treat">Лечение</button>
+        </div>
+        <div class="side-scroll" id="sideScroll">
+          <div class="tabpane" data-pane-right="layers" id="paneLayers"></div>
+          <div class="tabpane" data-pane-right="metrics" id="paneMetrics" hidden></div>
+          <div class="tabpane" data-pane-right="seg" id="paneSeg" hidden></div>
+          <div class="tabpane" data-pane-right="treat" id="paneTreat" hidden></div>
+        </div>
+        <div class="side-foot"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L2.4 18a2 2 0 001.7 3h15.8a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg><span>Результат создан моделью и не заменяет клиническое решение</span></div>
+      </aside>
+
+      <!-- ИИ-помощник -->
+      <aside class="ai" id="aiDrawer" aria-label="ИИ-помощник">
+        <div class="ai-head"><div><b>ИИ-помощник</b><span class="badge badge-ai">демо-режим</span></div><div class="ai-head-r"><button class="icon-btn" id="aiClose" aria-label="Закрыть"></button></div></div>
+        <div class="ai-ctx" id="aiCtx"></div>
+        <div class="ai-log" id="aiLog"></div>
+        <div class="ai-quick" id="aiQuick"></div>
+        <form class="ai-form" id="aiForm"><input id="aiInput" type="text" placeholder="Спросите о пациенте, снимках или источниках…" autocomplete="off"><button class="btn btn-primary btn-sm" type="submit">Отправить</button></form>
+        <div class="ai-warn">ИИ-помощник может ошибаться. Сверяйте медицинские утверждения с источниками. Демо-режим: ответы формируются по данным открытого случая, внешние сервисы не вызываются.</div>
+      </aside>
+    </div>
+  </div>
+</div>
+
+<!-- =====================================================  МОДАЛЬНЫЕ  ===================================================== -->
+<div class="modal" id="uploadModal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="upTitle">
+    <div class="modal-head"><h3 id="upTitle">Загрузить свое МРТ</h3><button class="icon-btn" data-close aria-label="Закрыть"></button></div>
+    <div class="modal-body" id="uploadBody"></div>
+  </div>
+</div>
+
+<div class="modal" id="reportModal" hidden>
+  <div class="modal-card wide" role="dialog" aria-modal="true" aria-labelledby="rpTitle">
+    <div class="modal-head"><div><h3 id="rpTitle">Заключение</h3><span class="badge badge-warn" id="rpStatus">Черновик</span></div><button class="icon-btn" data-close aria-label="Закрыть"></button></div>
+    <div class="modal-body report" id="reportBody"></div>
+  </div>
+</div>
+
+<div class="modal" id="confirmModal" hidden>
+  <div class="modal-card narrow" role="dialog" aria-modal="true">
+    <div class="modal-head"><h3 id="cfTitle">Подтверждение</h3><button class="icon-btn" data-close aria-label="Закрыть"></button></div>
+    <div class="modal-body" id="cfBody"></div>
+  </div>
+</div>
+
+<div class="modal" id="helpModal" hidden>
+  <div class="modal-card narrow" role="dialog" aria-modal="true">
+    <div class="modal-head"><h3>Горячие клавиши</h3><button class="icon-btn" data-close aria-label="Закрыть"></button></div>
+    <div class="modal-body keys" id="helpBody"></div>
+  </div>
+</div>
+
+<div class="cmdk" id="cmdk" hidden>
+  <div class="cmdk-card"><input id="cmdkInput" type="text" placeholder="Команда или действие…  (Esc — закрыть)" autocomplete="off"><div id="cmdkList"></div></div>
+</div>
+
+<div class="settings-pop" id="settingsPop" hidden></div>
+<div class="hover-tip" id="hoverTip" hidden></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<input type="file" id="fileInput" hidden multiple accept=".nii,.gz,.nii.gz,.dcm,.dicom,*/*">
+<input type="file" id="dirInput" hidden webkitdirectory>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
