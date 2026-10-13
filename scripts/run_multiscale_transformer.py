@@ -18,6 +18,13 @@ run_full_cohort.py):
 всех трёх моделей с самого начала - та же дисциплина, что и везде в проекте.
 Это разведочная проверка архитектуры, а не повторение гипотезы о новом
 входном канале: вход везде один и тот же (T1), меняется только модель.
+
+Только контраст "calc" и 8 эпох (не 15, как в остальных скриптах) - при
+трёх моделях на fold вместо одной прогон на CPU оказался намного дольше
+ожидаемого (один fold контраста calc с 15 эпохами не уложился в час
+фонового времени), так что объём обязательно урезан, а не просто оставлен
+"на сколько хватит времени" - то же решение и по той же причине, что и в
+scripts/run_dense_segmentation.py.
 """
 
 import os
@@ -39,8 +46,9 @@ from src import viz
 from src.subject_loader import load_subject_robust
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "results", "multiscale_transformer")
-CONTRASTS = ["calc", "mem"]
+CONTRASTS = ["calc"]  # "mem" пропущен - бюджет CPU-времени, см. docstring модуля
 PATCH_SIZE = 9
+TRAIN_EPOCHS = 8  # не 15 - бюджет CPU-времени, см. docstring модуля
 MAX_VOXELS_PER_SIDE_PER_SUBJECT = 500
 SEED = 0
 MODELS = {
@@ -160,7 +168,7 @@ def main():
             for model_name, model_factory in MODELS.items():
                 _, hist, pred, probs = train_one_fold(
                     patches[train_idx], labels[train_idx], patches[test_idx], test_labels,
-                    epochs=15, device="cpu", seed=SEED, model_factory=model_factory,
+                    epochs=TRAIN_EPOCHS, device="cpu", seed=SEED, model_factory=model_factory,
                 )
                 acc = hist["val_acc"][-1]
                 accs[model_name] = acc
