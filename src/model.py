@@ -138,6 +138,87 @@ class AttentionPatchCNN(nn.Module):
         return self.classifier(pooled).squeeze(-1)
 
 
+class MultiScaleAttentionPatchCNN(nn.Module):
+    """
+    Облегчённый перенос идеи MS-DSA-NET (модель сегментации FCD из
+    link.springer.com/article/10.1186/s13244-024-01803-8) на задачу
+    классификации патча: там несколько трансформер-путей подключены к
+    энкодеру на РАЗНЫХ масштабах (1/4, 1/8, 1/16, 1/32 разрешения) и
+    питают декодер через skip-соединения, чтобы дать сети одновременно
+    локальный и более широкий пространственный контекст. Декодер здесь не
+    нужен (одна метка на патч, а не плотная карта - та же причина, что и в
+    AttentionPatchCNN), поэтому оба масштаба вместо skip-соединений просто
+    пулятся в векторы и конкатенируются перед классификационной головой.
+
+    При patch_size=9 это даёт ровно два полезных масштаба (на патче 9^3
+    четыре даунсэмплинга выродили бы сетку в точку задолго до последнего
+    масштаба - см. самоаудит архитектур в src/model.py на предмет
+    деградации малых патчей):
+      - масштаб 1 (после одной свёртки stride=2): сетка ~5^3, канал c.
+      - масштаб 2 (после второй свёртки stride=2): сетка ~3^3, канал 2c.
+    У каждого масштаба свой небольшой self-attention трансформер и своё
+    позиционное вложение - в отличие от AttentionPatchCNN, где
+    трансформер видит только самый грубый масштаб.
+    """
+
+    def __init__(self, in_channels=1, base_channels=16, n_heads=4, n_layers=1, patch_size=9):
+        super().__init__()
+        c = base_channels
+        self.stem = nn.Sequential(
+            nn.Conv3d(in_channels, c, kernel_size=3, padding=1),
+            nn.BatchNorm3d(c),
+            nn.ReLU(inplace=True),
+        )
+        self.down1 = nn.Sequential(
+            nn.Conv3d(c, c, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm3d(c),
+            nn.ReLU(inplace=True),
+        )
+        self.down2 = nn.Sequential(
+            nn.Conv3d(c, c * 2, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm3d(c * 2),
+            nn.ReLU(inplace=True),
+        )
+
+        grid1 = -(-patch_size // 2)   # ceil(patch_size / 2), сетка после down1
+        grid2 = -(-patch_size // 4)   # ceil(patch_size / 4), сетка после down2
+
+        def make_pathway(dim, grid):
+            n_tokens = grid ** 3
+            pos_embed = nn.Parameter(torch.randn(1, n_tokens, dim) * 0.02)
+            layer = nn.TransformerEncoderLayer(
+                d_model=dim, nhead=n_heads, dim_feedforward=dim * 4,
+                dropout=0.1, batch_first=True,
+            )
+            encoder = nn.TransformerEncoder(layer, num_layers=n_layers)
+            return pos_embed, encoder
+
+        self.pos_embed1, self.transformer1 = make_pathway(c, grid1)
+        self.pos_embed2, self.transformer2 = make_pathway(c * 2, grid2)
+
+        combined_dim = c + c * 2
+        self.classifier = nn.Sequential(
+            nn.Linear(combined_dim, combined_dim), nn.ReLU(inplace=True),
+            nn.Dropout(0.3), nn.Linear(combined_dim, 1),
+        )
+
+    def _pathway(self, feats, pos_embed, transformer):
+        tokens = feats.flatten(2).transpose(1, 2)  # (N, n_tokens, dim)
+        tokens = tokens + pos_embed
+        tokens = transformer(tokens)
+        return tokens.mean(dim=1)  # (N, dim)
+
+    def forward(self, x):
+        """x: (N, 1, p, p, p) -> логиты (N,)"""
+        s0 = self.stem(x)
+        s1 = self.down1(s0)
+        s2 = self.down2(s1)
+        vec1 = self._pathway(s1, self.pos_embed1, self.transformer1)
+        vec2 = self._pathway(s2, self.pos_embed2, self.transformer2)
+        combined = torch.cat([vec1, vec2], dim=1)
+        return self.classifier(combined).squeeze(-1)
+
+
 class PatchUNet(nn.Module):
     """
     Настоящая U-Net: сверточный энкодер-декодер со skip-соединениями,

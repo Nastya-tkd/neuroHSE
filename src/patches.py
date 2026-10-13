@@ -83,3 +83,34 @@ def hemisphere_midpoint(volume_shape, axis_index=0):
     изображений в пространстве пациента, которые не приведены аффинно к
     симметричному шаблону)."""
     return volume_shape[axis_index] / 2.0
+
+
+def side_mask_volume(volume_shape, axis_index, midpoint, margin):
+    """
+    Аналог split_by_axis, но возвращает булевы маски формы volume_shape
+    целиком, а не булевы массивы по уже выбранному списку координат -
+    нужно для плотных (на весь объём) экспериментов (src/dense_model.py),
+    где защита от утечки означает не исключение граничных ПАТЧЕЙ, а
+    обнуление всего входа с другой стороны целиком: сеть с глобальным
+    рецептивным полем (трансформер на боттлнеке) в принципе может
+    "дотянуться" от любого вокселя одной стороны до любого вокселя другой,
+    так что при плотном подходе недостаточно вырезать полосу шириной
+    patch_size // 2 вокруг границы - необходимо обнулить все воксели
+    противоположной стороны целиком, чтобы их реальные значения были
+    буквально недоступны сети ни на этапе обучения, ни на этапе теста
+    (ноль - константа, не несущая информации об анатомии пациента с той
+    стороны). margin здесь нужен только чтобы не включать воксели прямо
+    на границе ни в одну из сторон (та же роль, что и в split_by_axis).
+
+    Возвращает (mask_a, mask_b) - булевы массивы формы volume_shape.
+    """
+    idx = np.arange(volume_shape[axis_index])
+    side_a_1d = idx < (midpoint - margin)
+    side_b_1d = idx > (midpoint + margin)
+
+    shape_for_broadcast = [1, 1, 1]
+    shape_for_broadcast[axis_index] = volume_shape[axis_index]
+
+    mask_a = np.broadcast_to(side_a_1d.reshape(shape_for_broadcast), volume_shape)
+    mask_b = np.broadcast_to(side_b_1d.reshape(shape_for_broadcast), volume_shape)
+    return mask_a, mask_b
